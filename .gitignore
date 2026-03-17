@@ -1,0 +1,34 @@
+# West workspace (cloned by west update)
+.west/
+/zephyr/
+/modules/
+/bootloader/
+
+# Python virtual environment
+.venv/
+
+# Zephyr SDK (installed by /sdk command)
+.sdk/
+
+# Build output
+build/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# CLI history
+.zephyr_cli_history
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
