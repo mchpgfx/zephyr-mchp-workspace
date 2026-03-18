@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 
 from rich.console import Console
 from rich.progress import (
@@ -13,7 +14,7 @@ from rich.progress import (
 )
 
 from ..config import (
-    WORKSPACE_ROOT, VENV_DIR, REQUIREMENTS, run_cmd,
+    WORKSPACE_ROOT, VENV_DIR, REQUIREMENTS,
 )
 from .sdk import (
     SDK_VERSION, SDK_BASE_URL, SDK_DIR, SDK_INSTALL_DIR,
@@ -308,66 +309,153 @@ def run(args: list[str], console: Console) -> None:
 
 
 def _run_west_update(west: str, console: Console) -> None:
-    """Run west update with a progress bar tracking each module.
+    """Run west update with granular git-level progress.
 
-    Each module has two phases: fetching (=== updating) and checked out
-    (HEAD is now at).  Progress is fractional so the bar moves smoothly
-    and never shows 100% until west actually exits.
+    Parses both west status lines (stdout) and git fetch progress
+    (stderr, requires -o --progress).  Each module gets a 0-100 slot;
+    within that slot, git's Receiving objects / Resolving deltas
+    percentages drive smooth bar movement.
     """
     n_modules = len(WEST_MODULES)
-    # Two ticks per module: started (0.5) + checked out (1.0)
-    total_ticks = n_modules * 2
-    current_tick = 0.0
-    current_module = ""
-    modules_seen = set()
+    # Each module gets a 0-100 range; total = n_modules * 100
+    total = n_modules * 100
+
+    # Shared state protected by lock
+    lock = threading.Lock()
+    finished = [0]          # number of fully completed modules
+    mod_pct = [0]           # 0-99 progress within current module
+    mod_name = [""]         # current module name
+    modules_seen = []       # ordered list of module names
+    git_phase = [""]        # e.g. "Receiving objects"
 
     with Progress(
         SpinnerColumn(),
         TextColumn("[cyan]{task.description}"),
         BarColumn(bar_width=30),
         TaskProgressColumn(),
+        TextColumn("[dim]{task.fields[detail]}"),
         TimeElapsedColumn(),
         console=console,
         transient=True,
     ) as progress:
-        task = progress.add_task("Fetching modules", total=total_ticks)
+        task = progress.add_task("Fetching modules", total=total, detail="")
 
-        for line in run_cmd([west, "update"], cwd=WORKSPACE_ROOT):
-            if line.startswith("=== updating"):
-                name = line.split("(")[0].replace("=== updating", "").strip()
-                # Previous module is now fully done — advance to its checkout tick
-                if current_module and current_tick % 2 != 0:
-                    current_tick = (len(modules_seen)) * 2
-                    progress.update(task, completed=current_tick)
+        def _update_bar():
+            with lock:
+                base = finished[0] * 100
+                completed = min(base + mod_pct[0], total - 1)
+                name = mod_name[0] or "modules"
+                detail = git_phase[0]
+            progress.update(task, completed=completed,
+                            description=f"Fetching {name}", detail=detail)
 
-                current_module = name
-                if name not in modules_seen:
-                    modules_seen.add(name)
-                    if name not in WEST_MODULES:
-                        n_modules += 1
-                        total_ticks = n_modules * 2
-                        progress.update(task, total=total_ticks)
+        def _finish_module():
+            """Mark the current module as complete."""
+            with lock:
+                if mod_name[0] and mod_pct[0] < 100:
+                    finished[0] += 1
+                mod_pct[0] = 0
+                git_phase[0] = ""
 
-                # Started tick: halfway into this module's slot
-                current_tick = (len(modules_seen) - 1) * 2 + 1
-                progress.update(
-                    task, completed=current_tick,
-                    description=f"Fetching {name}",
-                )
+        # -- stdout reader: west status lines -------------------------
+        def read_stdout():
+            nonlocal n_modules, total
+            for raw in proc.stdout:
+                line = raw.decode("utf-8", errors="replace").strip()
+                if line.startswith("=== updating"):
+                    name = line.split("(")[0].replace("=== updating", "").strip()
+                    _finish_module()
+                    with lock:
+                        mod_name[0] = name
+                        mod_pct[0] = 0
+                        if name not in modules_seen:
+                            modules_seen.append(name)
+                            if name not in WEST_MODULES:
+                                n_modules += 1
+                                total = n_modules * 100
+                                progress.update(task, total=total)
+                    _update_bar()
 
-            elif line.startswith("HEAD is now at") and current_module:
-                # Checkout done for current module
-                current_tick = len(modules_seen) * 2
-                progress.update(
-                    task, completed=current_tick,
-                    description=f"Checked out {current_module}",
-                )
+        # -- stderr reader: git progress + HEAD lines -----------------
+        pct_re = re.compile(r"(\d+)%")
 
-        # west exited — mark fully complete
-        progress.update(task, completed=total_ticks, description="Done")
-        rc = run_cmd.last_returncode
+        def read_stderr():
+            buf = bytearray()
+            while True:
+                byte = proc.stderr.read(1)
+                if not byte:
+                    break
+                if byte in (b"\r", b"\n"):
+                    if buf:
+                        line = buf.decode("utf-8", errors="replace").strip()
+                        buf.clear()
+                        if line:
+                            _handle_stderr_line(line)
+                else:
+                    buf += byte
+            if buf:
+                line = buf.decode("utf-8", errors="replace").strip()
+                if line:
+                    _handle_stderr_line(line)
 
-    if rc != 0:
-        console.print(f"        [red]X west update failed (exit {rc})[/]")
-        raise RuntimeError(f"west update failed (exit {rc})")
+        def _handle_stderr_line(line: str):
+            if line.startswith("HEAD is now at"):
+                with lock:
+                    mod_pct[0] = 100
+                    git_phase[0] = ""
+                _finish_module()
+                _update_bar()
+                return
+
+            m = pct_re.search(line)
+            if not m:
+                return
+            raw_pct = int(m.group(1))
+
+            # Scale git phases into the module's 0-99 range:
+            #   Counting/Compressing:  0-10
+            #   Receiving objects:    10-90  (the big download)
+            #   Resolving deltas:    90-99
+            if "Receiving objects" in line:
+                scaled = 10 + int(raw_pct * 0.8)
+                phase = f"Receiving {raw_pct}%"
+            elif "Resolving deltas" in line:
+                scaled = 90 + int(raw_pct * 0.09)
+                phase = f"Resolving {raw_pct}%"
+            elif "Counting" in line or "Compressing" in line:
+                scaled = int(raw_pct * 0.1)
+                phase = ""
+            else:
+                scaled = int(raw_pct * 0.5)
+                phase = ""
+
+            with lock:
+                mod_pct[0] = min(scaled, 99)
+                if phase:
+                    git_phase[0] = phase
+            _update_bar()
+
+        # -- Run west update with git progress enabled ----------------
+        # Use -o=--progress (single arg) because argparse treats
+        # -o --progress as two separate flags.
+        proc = subprocess.Popen(
+            [west, "update", "-o=--progress"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=WORKSPACE_ROOT,
+        )
+
+        t_out = threading.Thread(target=read_stdout, daemon=True)
+        t_err = threading.Thread(target=read_stderr, daemon=True)
+        t_out.start()
+        t_err.start()
+        t_out.join()
+        t_err.join()
+        proc.wait()
+
+        progress.update(task, completed=total, description="Done", detail="")
+
+    if proc.returncode != 0:
+        console.print(f"        [red]X west update failed (exit {proc.returncode})[/]")
+        raise RuntimeError(f"west update failed (exit {proc.returncode})")
     console.print(f"        [green]OK[/] All {len(modules_seen)} modules fetched")
