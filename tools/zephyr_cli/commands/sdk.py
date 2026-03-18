@@ -153,29 +153,44 @@ def _run_subprocess_with_spinner(
 
 
 def _register_sdk(console: Console) -> None:
-    """Run setup.cmd to register the SDK CMake package, with hang protection."""
-    setup_cmd = os.path.join(SDK_INSTALL_DIR, "setup.cmd")
-    if os.path.isfile(setup_cmd):
-        try:
-            result = subprocess.run(
-                ["cmd", "/c", setup_cmd],
-                cwd=SDK_INSTALL_DIR,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                console.print("        [green]OK[/] SDK registered (CMake package)")
-            else:
-                console.print(f"        [yellow]Warning:[/] setup.cmd exited with {result.returncode}")
-                if result.stderr.strip():
-                    console.print(f"        {result.stderr.strip()}")
-        except subprocess.TimeoutExpired:
-            console.print("        [yellow]Warning:[/] setup.cmd timed out (30s), skipping")
-            console.print("        [dim]The SDK will still work — builds use ZEPHYR_SDK_INSTALL_DIR.[/]")
-    else:
-        console.print("        [yellow]Skipped[/] setup.cmd not found")
+    """Register the SDK CMake package by calling cmake directly."""
+    export_script = os.path.join(SDK_INSTALL_DIR, "cmake", "zephyr_sdk_export.cmake")
+    if not os.path.isfile(export_script):
+        console.print("        [yellow]Skipped[/] SDK cmake export script not found")
+        return
+
+    # Find cmake — prefer venv, fall back to PATH
+    cmake = None
+    for candidate in [
+        os.path.join(VENV_DIR, "Scripts", "cmake.exe"),
+        os.path.join(VENV_DIR, "bin", "cmake"),
+    ]:
+        if os.path.isfile(candidate):
+            cmake = candidate
+            break
+    if not cmake:
+        cmake = shutil.which("cmake")
+    if not cmake:
+        console.print("        [yellow]Skipped[/] cmake not found")
+        return
+
+    try:
+        result = subprocess.run(
+            [cmake, "-P", export_script],
+            cwd=SDK_INSTALL_DIR,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            console.print("        [green]OK[/] SDK registered (CMake package)")
+        else:
+            console.print(f"        [yellow]Warning:[/] cmake export exited with {result.returncode}")
+            if result.stderr.strip():
+                console.print(f"        {result.stderr.strip()}")
+    except subprocess.TimeoutExpired:
+        console.print("        [yellow]Warning:[/] cmake export timed out (30s), skipping")
 
 
 def _run_zephyr_export(console: Console) -> None:
