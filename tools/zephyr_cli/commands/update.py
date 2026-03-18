@@ -1,44 +1,29 @@
 """  /update  -- pull latest modules and re-export."""
 
-import shutil
 import subprocess
 
 from rich.console import Console
 
-from ..config import WORKSPACE_ROOT, WEST_EXE, run_cmd
+from ..config import WORKSPACE_ROOT
+from .install import _run_west_update, WEST_MODULES
+from .sdk import _register_sdk, _run_zephyr_export
 
 
 def run(args: list[str], console: Console) -> None:
+    from ..config import _find_west
+    west = _find_west()
+
     console.print("  [cyan]*[/] Updating modules...")
+    _run_west_update(west, console)
 
-    for line in run_cmd([WEST_EXE, "update"], cwd=WORKSPACE_ROOT):
-        if line.startswith("=== updating"):
-            name = line.split("(")[0].replace("=== updating", "").strip()
-            console.print(f"    [dim]-> {name}[/]")
-
-    rc = run_cmd.last_returncode
-    if rc != 0:
-        console.print(f"  [red]X west update failed (exit {rc})[/]")
-        return
-
-    console.print("  [green]OK[/] Modules up to date")
-
-    console.print("  [cyan]*[/] Re-registering CMake package...")
-    cmake = shutil.which("cmake")
-    if cmake:
-        subprocess.run(
-            [WEST_EXE, "zephyr-export"],
-            check=True, cwd=WORKSPACE_ROOT,
-            capture_output=True,
-        )
-        console.print("  [green]OK[/] CMake package registered")
-    else:
-        console.print("  [yellow]Skipped[/] (CMake not found)")
+    console.print("  [cyan]*[/] Re-registering CMake packages...")
+    _register_sdk(console)
+    _run_zephyr_export(console)
 
     # Show workspace summary
     console.print()
     result = subprocess.run(
-        [WEST_EXE, "list"],
+        [west, "list"],
         capture_output=True, text=True, cwd=WORKSPACE_ROOT,
     )
     if result.returncode == 0:
