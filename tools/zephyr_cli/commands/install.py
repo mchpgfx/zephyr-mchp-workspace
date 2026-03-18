@@ -308,9 +308,18 @@ def run(args: list[str], console: Console) -> None:
 
 
 def _run_west_update(west: str, console: Console) -> None:
-    """Run west update with a progress bar tracking each module."""
-    total = len(WEST_MODULES)
-    done = set()
+    """Run west update with a progress bar tracking each module.
+
+    Each module has two phases: fetching (=== updating) and checked out
+    (HEAD is now at).  Progress is fractional so the bar moves smoothly
+    and never shows 100% until west actually exits.
+    """
+    n_modules = len(WEST_MODULES)
+    # Two ticks per module: started (0.5) + checked out (1.0)
+    total_ticks = n_modules * 2
+    current_tick = 0.0
+    current_module = ""
+    modules_seen = set()
 
     with Progress(
         SpinnerColumn(),
@@ -321,22 +330,44 @@ def _run_west_update(west: str, console: Console) -> None:
         console=console,
         transient=True,
     ) as progress:
-        task = progress.add_task("Fetching modules", total=total)
+        task = progress.add_task("Fetching modules", total=total_ticks)
 
         for line in run_cmd([west, "update"], cwd=WORKSPACE_ROOT):
             if line.startswith("=== updating"):
                 name = line.split("(")[0].replace("=== updating", "").strip()
-                if name in WEST_MODULES and name not in done:
-                    done.add(name)
-                    progress.update(task, completed=len(done), description=f"Fetching {name}")
-                elif name not in done:
-                    done.add(name)
-                    total += 1
-                    progress.update(task, total=total, completed=len(done), description=f"Fetching {name}")
+                # Previous module is now fully done — advance to its checkout tick
+                if current_module and current_tick % 2 != 0:
+                    current_tick = (len(modules_seen)) * 2
+                    progress.update(task, completed=current_tick)
 
+                current_module = name
+                if name not in modules_seen:
+                    modules_seen.add(name)
+                    if name not in WEST_MODULES:
+                        n_modules += 1
+                        total_ticks = n_modules * 2
+                        progress.update(task, total=total_ticks)
+
+                # Started tick: halfway into this module's slot
+                current_tick = (len(modules_seen) - 1) * 2 + 1
+                progress.update(
+                    task, completed=current_tick,
+                    description=f"Fetching {name}",
+                )
+
+            elif line.startswith("HEAD is now at") and current_module:
+                # Checkout done for current module
+                current_tick = len(modules_seen) * 2
+                progress.update(
+                    task, completed=current_tick,
+                    description=f"Checked out {current_module}",
+                )
+
+        # west exited — mark fully complete
+        progress.update(task, completed=total_ticks, description="Done")
         rc = run_cmd.last_returncode
 
     if rc != 0:
         console.print(f"        [red]X west update failed (exit {rc})[/]")
         raise RuntimeError(f"west update failed (exit {rc})")
-    console.print(f"        [green]OK[/] All {len(done)} modules fetched")
+    console.print(f"        [green]OK[/] All {len(modules_seen)} modules fetched")
