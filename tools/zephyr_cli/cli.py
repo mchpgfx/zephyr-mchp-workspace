@@ -25,7 +25,7 @@ from .commands import install, update, build, create_app, sdk
 # ── Autocomplete ──────────────────────────────────────────────────
 
 COMMANDS = {
-    "/install":     "Full setup (venv, west, SDK, toolchain):  /install [--all | --riscv]",
+    "/install":     "Full setup:  /install [--stable | --latest | --zephyr-ref REF] [--riscv]",
     "/sdk":         "Manage SDK toolchains:  /sdk [--status | --riscv | --all]",
     "/update":      "Update Zephyr and modules",
     "/build":       "Build an application:  /build <app> -b <board>",
@@ -82,14 +82,21 @@ class ZephyrCompleter(Completer):
 
         # /install completions
         elif cmd == "/install":
-            install_opts = ["--all", "--riscv"]
-            if n == 1 and text.endswith(" "):
-                for o in install_opts:
+            install_opts = [
+                "--stable", "--latest", "--zephyr-ref", "--zephyr-repo",
+                "--all", "--riscv", "--help",
+            ]
+            # Complete any flag that hasn't been typed yet
+            typed = set(words[1:])
+            remaining = [o for o in install_opts if o not in typed]
+            current = words[-1] if not text.endswith(" ") and n > 1 else ""
+            if text.endswith(" "):
+                for o in remaining:
                     yield Completion(o)
-            elif n == 2 and not text.endswith(" "):
-                for o in install_opts:
-                    if o.startswith(words[1]):
-                        yield Completion(o, start_position=-len(words[1]))
+            elif current:
+                for o in remaining:
+                    if o.startswith(current):
+                        yield Completion(o, start_position=-len(current))
 
         # /sdk completions
         elif cmd == "/sdk":

@@ -16,9 +16,13 @@ All commands run through the interactive CLI or directly via batch/PowerShell en
 .\zephyr.ps1            # PowerShell
 
 # First-time setup (venv, west, SDK, ARM toolchain — everything)
-.\zephyr.bat /install
-.\zephyr.bat /install --riscv    # Also install RISC-V toolchain
-.\zephyr.bat /install --all      # Install all toolchains
+.\zephyr.bat /install                         # pinned stable (v4.3.0)
+.\zephyr.bat /install --stable                # latest stable release
+.\zephyr.bat /install --latest                # Zephyr main branch
+.\zephyr.bat /install --zephyr-ref v4.2.1     # specific tag/branch/SHA
+.\zephyr.bat /install --zephyr-repo URL       # use a fork
+.\zephyr.bat /install --riscv                 # also install RISC-V toolchain
+.\zephyr.bat /install --all                   # all toolchains
 
 # Manage SDK toolchains separately (add RISC-V later, check status)
 .\zephyr.bat /sdk --status
