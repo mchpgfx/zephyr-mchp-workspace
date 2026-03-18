@@ -249,6 +249,7 @@ def run(args: list[str], console: Console) -> None:
     # -- 6. west update (with module progress) -----------------------------
     next_step("Fetching Zephyr and modules...")
     _run_west_update(west, console)
+    _attach_zephyr_branch(zephyr_ref, console)
 
     # -- 7. Auto-detect + download SDK ------------------------------------
     version = detect_sdk_version(console)
@@ -462,3 +463,65 @@ def _run_west_update(west: str, console: Console) -> None:
         console.print(f"        [red]X west update failed (exit {proc.returncode})[/]")
         raise RuntimeError(f"west update failed (exit {proc.returncode})")
     console.print(f"        [green]OK[/] All {len(modules_seen)} modules fetched")
+
+
+def _attach_zephyr_branch(revision: str, console: Console) -> None:
+    """Attach HEAD to a branch in zephyr/ if the revision is a remote branch.
+
+    West always checks out revisions as detached HEAD.  For branch-based
+    workflows (forks), this re-attaches HEAD so commits and pushes work
+    naturally from zephyr/.  Skipped for tags (vX.Y.Z) and raw SHAs.
+    """
+    zephyr_dir = os.path.join(WORKSPACE_ROOT, "zephyr")
+    if not os.path.isdir(zephyr_dir):
+        return
+
+    # Skip if revision looks like a tag (vX.Y.Z) or a full SHA
+    if re.match(r"^v\d+\.\d+", revision):
+        return
+    if re.match(r"^[0-9a-f]{7,40}$", revision):
+        return
+
+    # Already on this branch — nothing to do
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--short", "HEAD"],
+        capture_output=True, text=True, cwd=zephyr_dir,
+    )
+    if result.returncode == 0 and result.stdout.strip() == revision:
+        return
+
+    # Find which remote has this branch (west names it from the manifest)
+    result = subprocess.run(
+        ["git", "remote"], capture_output=True, text=True, cwd=zephyr_dir,
+    )
+    remote = None
+    for r in result.stdout.strip().splitlines():
+        r = r.strip()
+        check = subprocess.run(
+            ["git", "ls-remote", "--heads", r, revision],
+            capture_output=True, text=True, cwd=zephyr_dir, timeout=15,
+        )
+        if check.returncode == 0 and check.stdout.strip():
+            remote = r
+            break
+
+    if not remote:
+        return
+
+    # Create or reset local branch tracking the remote
+    subprocess.run(
+        ["git", "fetch", remote, f"{revision}:{revision}"],
+        capture_output=True, text=True, cwd=zephyr_dir,
+    )
+    subprocess.run(
+        ["git", "branch", f"--set-upstream-to={remote}/{revision}", revision],
+        capture_output=True, text=True, cwd=zephyr_dir,
+    )
+    result = subprocess.run(
+        ["git", "checkout", revision],
+        capture_output=True, text=True, cwd=zephyr_dir,
+    )
+    if result.returncode == 0:
+        console.print(f"        [green]OK[/] Checked out branch [bold]{revision}[/]")
+    else:
+        console.print(f"        [dim]Could not attach to branch {revision}[/]")

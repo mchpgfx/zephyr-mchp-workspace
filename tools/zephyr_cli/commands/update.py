@@ -5,7 +5,7 @@ import subprocess
 from rich.console import Console
 
 from ..config import WORKSPACE_ROOT
-from .install import _run_west_update, WEST_MODULES
+from .install import _run_west_update, _attach_zephyr_branch, _read_current_manifest
 from .sdk import _register_sdk, _run_zephyr_export
 
 
@@ -15,6 +15,8 @@ def run(args: list[str], console: Console) -> None:
 
     console.print("  [cyan]*[/] Updating modules...")
     _run_west_update(west, console)
+    ref, _ = _read_current_manifest()
+    _attach_zephyr_branch(ref, console)
 
     console.print("  [cyan]*[/] Re-registering CMake packages...")
     _register_sdk(console)
