@@ -19,7 +19,7 @@ from .config import (
     WORKSPACE_ROOT, WEST_EXE, ALL_BOARDS, BOARDS,
     get_apps, BUILD_DIR, VENV_DIR, zephyr_env,
 )
-from .commands import install, update, build, create_app, sdk
+from .commands import install, update, build, flash, create_app, sdk
 
 
 # ── Autocomplete ──────────────────────────────────────────────────
@@ -29,6 +29,7 @@ COMMANDS = {
     "/sdk":         "Manage SDK toolchains:  /sdk [--status | --riscv | --all]",
     "/update":      "Update Zephyr and modules",
     "/build":       "Build an application:  /build <app> -b <board>",
+    "/flash":       "Flash firmware:  /flash <app> [--runner jlink]",
     "/create-app":  "Scaffold a new application",
     "/status":      "Show workspace status (Zephyr, SDK, toolchains, apps)",
     "/boards":      "List supported Microchip/Atmel boards",
@@ -109,6 +110,19 @@ class ZephyrCompleter(Completer):
                 for o in sdk_opts:
                     if o.startswith(words[1]):
                         yield Completion(o, start_position=-len(words[1]))
+
+        # /flash completions
+        elif cmd == "/flash":
+            if n == 1 and text.endswith(" "):
+                for a in get_apps():
+                    yield Completion(a)
+            elif n == 2 and not text.endswith(" "):
+                for a in get_apps():
+                    if a.startswith(words[1]):
+                        yield Completion(a, start_position=-len(words[1]))
+            elif text.endswith(" "):
+                for o in ["--runner"]:
+                    yield Completion(o)
 
         # /create-app: no completions (free-form name)
 
@@ -313,6 +327,7 @@ HANDLERS = {
     "/sdk":        sdk.run,
     "/update":     update.run,
     "/build":      build.run,
+    "/flash":      flash.run,
     "/create-app": create_app.run,
     "/status":     cmd_status,
     "/boards":     cmd_boards,
