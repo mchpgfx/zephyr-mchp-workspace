@@ -13,16 +13,14 @@ from rich.progress import (
     TaskProgressColumn,
 )
 
+import re as _re
+
 from ..config import WORKSPACE_ROOT, VENV_DIR
 
-SDK_VERSION = "0.16.9"
-SDK_BASE_URL = (
-    f"https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v{SDK_VERSION}"
-)
-SDK_DIR = os.path.join(WORKSPACE_ROOT, ".sdk")
-SDK_INSTALL_DIR = os.path.join(SDK_DIR, f"zephyr-sdk-{SDK_VERSION}")
+# Fallback when Zephyr source hasn't been fetched yet
+_DEFAULT_SDK_VERSION = "0.16.9"
 
-MINIMAL_ARCHIVE = f"zephyr-sdk-{SDK_VERSION}_windows-x86_64_minimal.7z"
+SDK_DIR = os.path.join(WORKSPACE_ROOT, ".sdk")
 
 TOOLCHAINS = {
     "arm": {
@@ -34,6 +32,117 @@ TOOLCHAINS = {
         "desc": "RISC-V 64-bit  (mpfs_icicle, m2gl025_miv -- 2 boards)",
     },
 }
+
+
+# ── SDK version detection ─────────────────────────────────────────
+
+def _detect_min_sdk_version() -> str | None:
+    """Parse the minimum SDK version from the Zephyr source.
+
+    Reads zephyr/cmake/modules/FindHostTools.cmake for:
+        find_package(Zephyr-sdk X.Y)
+    Returns the version string (e.g. "1.0") or None.
+    """
+    host_tools = os.path.join(WORKSPACE_ROOT, "zephyr", "cmake",
+                              "modules", "FindHostTools.cmake")
+    if not os.path.isfile(host_tools):
+        return None
+    try:
+        with open(host_tools) as f:
+            for line in f:
+                m = _re.search(r"find_package\s*\(\s*Zephyr-sdk\s+([\d.]+)", line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return None
+
+
+def _find_best_sdk_release(min_version: str, console: Console) -> str:
+    """Query GitHub for the latest SDK release compatible with min_version.
+
+    Finds the newest vX.Y.Z tag where major version matches and
+    the full version is >= min_version.
+    """
+    from packaging.version import Version
+
+    min_ver = Version(min_version)
+
+    with console.status("[cyan]Detecting compatible SDK version...[/]", spinner="dots"):
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags",
+             "https://github.com/zephyrproject-rtos/sdk-ng.git"],
+            capture_output=True, text=True, timeout=30,
+        )
+    if result.returncode != 0:
+        raise RuntimeError("Failed to query SDK tags from GitHub")
+
+    pattern = _re.compile(r"refs/tags/v(\d+\.\d+\.\d+)$")
+    candidates = []
+    for line in result.stdout.splitlines():
+        m = pattern.search(line)
+        if m:
+            ver = Version(m.group(1))
+            # Same major version and >= minimum
+            if ver.major == min_ver.major and ver >= min_ver:
+                candidates.append(m.group(1))
+
+    if not candidates:
+        raise RuntimeError(
+            f"No SDK release found compatible with Zephyr requirement >={min_version}"
+        )
+
+    candidates.sort(key=Version)
+    return candidates[-1]
+
+
+def detect_sdk_version(console: Console) -> str:
+    """Detect the SDK version to use: auto-detect from Zephyr source, or fallback."""
+    min_ver = _detect_min_sdk_version()
+    if min_ver:
+        return _find_best_sdk_release(min_ver, console)
+    return _DEFAULT_SDK_VERSION
+
+
+def sdk_paths(version: str) -> dict:
+    """Compute SDK paths for a given version."""
+    install_dir = os.path.join(SDK_DIR, f"zephyr-sdk-{version}")
+    base_url = f"https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v{version}"
+    minimal_archive = f"zephyr-sdk-{version}_windows-x86_64_minimal.7z"
+    return {
+        "version": version,
+        "install_dir": install_dir,
+        "base_url": base_url,
+        "minimal_archive": minimal_archive,
+    }
+
+
+def _tc_extract_dir(install_dir: str) -> str:
+    """Return the directory where toolchains should be extracted.
+
+    SDK >= 1.0.0 expects toolchains under gnu/, older SDKs expect
+    them directly in the install dir.
+    """
+    if os.path.isfile(os.path.join(install_dir, "sdk_gnu_toolchains")):
+        gnu_dir = os.path.join(install_dir, "gnu")
+        os.makedirs(gnu_dir, exist_ok=True)
+        return gnu_dir
+    return install_dir
+
+
+def _tc_dir(install_dir: str, tc_name: str) -> str:
+    """Return the expected directory for an installed toolchain."""
+    base = _tc_extract_dir(install_dir)
+    if tc_name == "arm":
+        return os.path.join(base, "arm-zephyr-eabi")
+    return os.path.join(base, "riscv64-zephyr-elf")
+
+
+# Legacy module-level constants for backwards compatibility (cli.py etc.)
+SDK_VERSION = _DEFAULT_SDK_VERSION
+SDK_BASE_URL = f"https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v{SDK_VERSION}"
+SDK_INSTALL_DIR = os.path.join(SDK_DIR, f"zephyr-sdk-{SDK_VERSION}")
+MINIMAL_ARCHIVE = f"zephyr-sdk-{SDK_VERSION}_windows-x86_64_minimal.7z"
 
 
 # ── Progress helpers ──────────────────────────────────────────────
@@ -152,9 +261,13 @@ def _run_subprocess_with_spinner(
         )
 
 
-def _register_sdk(console: Console) -> None:
+def _register_sdk(console: Console, install_dir: str | None = None) -> None:
     """Register the SDK CMake package by calling cmake directly."""
-    export_script = os.path.join(SDK_INSTALL_DIR, "cmake", "zephyr_sdk_export.cmake")
+    sdk_dir = install_dir or _find_installed_sdk_dir()
+    if not sdk_dir:
+        console.print("        [yellow]Skipped[/] No SDK installation found")
+        return
+    export_script = os.path.join(sdk_dir, "cmake", "zephyr_sdk_export.cmake")
     if not os.path.isfile(export_script):
         console.print("        [yellow]Skipped[/] SDK cmake export script not found")
         return
@@ -177,7 +290,7 @@ def _register_sdk(console: Console) -> None:
     try:
         result = subprocess.run(
             [cmake, "-P", export_script],
-            cwd=SDK_INSTALL_DIR,
+            cwd=sdk_dir,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
@@ -211,10 +324,24 @@ def _run_zephyr_export(console: Console) -> None:
             pass
 
 
+def _find_installed_sdk_dir() -> str | None:
+    """Find an existing SDK installation under .sdk/."""
+    if not os.path.isdir(SDK_DIR):
+        return None
+    for entry in sorted(os.listdir(SDK_DIR), reverse=True):
+        candidate = os.path.join(SDK_DIR, entry)
+        if entry.startswith("zephyr-sdk-") and os.path.isfile(
+            os.path.join(candidate, "sdk_version")
+        ):
+            return candidate
+    return None
+
+
 def _usage(console: Console) -> None:
     console.print("  Usage: [bold]/sdk[/] [--all | --riscv]")
     console.print()
-    console.print("  Installs Zephyr SDK v{} + CMake into the workspace.".format(SDK_VERSION))
+    console.print("  Installs Zephyr SDK + CMake into the workspace.")
+    console.print("  SDK version is auto-detected from the Zephyr source.")
     console.print()
     console.print("  Options:")
     console.print("    [bold](default)[/]  ARM toolchain only  (26 Cortex-M/R/A boards)")
@@ -225,16 +352,26 @@ def _usage(console: Console) -> None:
 
 def _status(console: Console) -> None:
     """Show what's installed."""
-    if not os.path.isdir(SDK_INSTALL_DIR):
+    sdk_dir = _find_installed_sdk_dir()
+    if not sdk_dir:
         console.print("  SDK not installed. Run [bold]/install[/] to set up everything.")
         return
-    console.print(f"  SDK v{SDK_VERSION} installed at .sdk/")
+
+    # Read version from installed SDK
+    ver_file = os.path.join(sdk_dir, "sdk_version")
+    try:
+        with open(ver_file) as f:
+            installed_ver = f.read().strip()
+    except OSError:
+        installed_ver = os.path.basename(sdk_dir).replace("zephyr-sdk-", "")
+
+    min_ver = _detect_min_sdk_version()
+    console.print(f"  SDK v{installed_ver} installed at {os.path.relpath(sdk_dir, WORKSPACE_ROOT)}/")
+    if min_ver:
+        console.print(f"  Zephyr requires SDK >= {min_ver}")
+
     for tc_name, tc_info in TOOLCHAINS.items():
-        if tc_name == "arm":
-            tc_dir = os.path.join(SDK_INSTALL_DIR, "arm-zephyr-eabi")
-        else:
-            tc_dir = os.path.join(SDK_INSTALL_DIR, "riscv64-zephyr-elf")
-        installed = os.path.isdir(tc_dir)
+        installed = os.path.isdir(_tc_dir(sdk_dir, tc_name))
         mark = "[green]OK[/]" if installed else "[dim]--[/]"
         console.print(f"    {mark} {tc_name:10s}  {tc_info['desc']}")
 
@@ -281,58 +418,57 @@ def run(args: list[str], console: Console) -> None:
             cmake_path = venv_cmake
     console.print(f"        [green]OK[/] cmake -> {cmake_path or 'installed'}")
 
+    # -- Detect SDK version from Zephyr source -----------------------------
+    version = detect_sdk_version(console)
+    paths = sdk_paths(version)
+    console.print(f"        SDK version: {version}")
+
     # -- 2. Download + extract minimal SDK ---------------------------------
     os.makedirs(SDK_DIR, exist_ok=True)
     downloads_dir = os.path.join(SDK_DIR, "_downloads")
     os.makedirs(downloads_dir, exist_ok=True)
 
-    next_step("Downloading Zephyr SDK v{} (minimal)...".format(SDK_VERSION))
-    minimal_path = os.path.join(downloads_dir, MINIMAL_ARCHIVE)
-    if os.path.isdir(SDK_INSTALL_DIR) and os.path.isfile(
-        os.path.join(SDK_INSTALL_DIR, "sdk_version")
+    next_step(f"Downloading Zephyr SDK v{version} (minimal)...")
+    minimal_path = os.path.join(downloads_dir, paths["minimal_archive"])
+    if os.path.isdir(paths["install_dir"]) and os.path.isfile(
+        os.path.join(paths["install_dir"], "sdk_version")
     ):
         console.print("        [green]OK[/] Already extracted, skipping download")
     else:
         if not os.path.isfile(minimal_path):
-            url = f"{SDK_BASE_URL}/{MINIMAL_ARCHIVE}"
+            url = f"{paths['base_url']}/{paths['minimal_archive']}"
             _download(url, minimal_path, "minimal SDK", console)
         _extract_7z(minimal_path, SDK_DIR, "minimal SDK", console)
         console.print("        [green]OK[/] Minimal SDK extracted")
 
     # -- 3+. Download + extract toolchains ---------------------------------
+    extract_dir = _tc_extract_dir(paths["install_dir"])
     for tc_name in toolchains_to_install:
         tc = TOOLCHAINS[tc_name]
         archive_file = tc["archive"]
         archive_path = os.path.join(downloads_dir, archive_file)
-
-        if tc_name == "arm":
-            tc_dir = os.path.join(SDK_INSTALL_DIR, "arm-zephyr-eabi")
-        else:
-            tc_dir = os.path.join(SDK_INSTALL_DIR, "riscv64-zephyr-elf")
+        tc_installed_dir = _tc_dir(paths["install_dir"], tc_name)
 
         next_step(f"Installing {tc_name} toolchain...")
-        if os.path.isdir(tc_dir):
+        if os.path.isdir(tc_installed_dir):
             console.print(f"        [green]OK[/] {tc_name} already installed")
             continue
 
         if not os.path.isfile(archive_path):
-            url = f"{SDK_BASE_URL}/{archive_file}"
+            url = f"{paths['base_url']}/{archive_file}"
             _download(url, archive_path, tc['desc'], console)
 
-        _extract_7z(archive_path, SDK_INSTALL_DIR, tc_name, console)
+        _extract_7z(archive_path, extract_dir, tc_name, console)
         console.print(f"        [green]OK[/] {tc_name} toolchain installed")
 
-    # -- Register SDK (setup.cmd) ------------------------------------------
+    # -- Register SDK ------------------------------------------------------
     next_step("Registering SDK...")
-    _register_sdk(console)
-
-    # Also run west zephyr-export if workspace is initialised
+    _register_sdk(console, install_dir=paths["install_dir"])
     _run_zephyr_export(console)
 
-    # -- Clean up downloads (optional, keep for re-installs) ---------------
     console.print()
     console.print("  [bold green]SDK ready![/]")
-    console.print(f"  Location:     .sdk/zephyr-sdk-{SDK_VERSION}/")
+    console.print(f"  Location:     .sdk/zephyr-sdk-{version}/")
     console.print(f"  Toolchains:   {', '.join(toolchains_to_install)}")
     if not want_riscv:
         console.print(

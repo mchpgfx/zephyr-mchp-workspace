@@ -17,8 +17,8 @@ from ..config import (
     WORKSPACE_ROOT, VENV_DIR, REQUIREMENTS,
 )
 from .sdk import (
-    SDK_VERSION, SDK_BASE_URL, SDK_DIR, SDK_INSTALL_DIR,
-    MINIMAL_ARCHIVE, TOOLCHAINS,
+    SDK_DIR, TOOLCHAINS,
+    detect_sdk_version, sdk_paths, _tc_extract_dir, _tc_dir,
     _download, _extract_7z, _run_pip,
     _register_sdk, _run_zephyr_export,
 )
@@ -170,10 +170,13 @@ def run(args: list[str], console: Console) -> None:
     elif "--stable" in args:
         zephyr_ref = _get_latest_stable(console)
 
-    # Defaults
-    if not zephyr_ref:
-        current_ref, _ = _read_current_manifest()
-        zephyr_ref = current_ref
+    # Defaults: preserve whatever is currently in the manifest
+    if not zephyr_ref or not zephyr_repo:
+        current_ref, current_url = _read_current_manifest()
+        if not zephyr_ref:
+            zephyr_ref = current_ref
+        if not zephyr_repo and current_url != DEFAULT_ZEPHYR_REPO:
+            zephyr_repo = current_url
 
     # -- Step counter
     total_steps = 8 + len(toolchains_to_install)
@@ -247,57 +250,57 @@ def run(args: list[str], console: Console) -> None:
     next_step("Fetching Zephyr and modules...")
     _run_west_update(west, console)
 
-    # -- 7. Download + extract minimal SDK ---------------------------------
+    # -- 7. Auto-detect + download SDK ------------------------------------
+    version = detect_sdk_version(console)
+    paths = sdk_paths(version)
+
     os.makedirs(SDK_DIR, exist_ok=True)
     downloads_dir = os.path.join(SDK_DIR, "_downloads")
     os.makedirs(downloads_dir, exist_ok=True)
 
-    next_step(f"Downloading Zephyr SDK v{SDK_VERSION} (minimal)...")
-    minimal_path = os.path.join(downloads_dir, MINIMAL_ARCHIVE)
-    if os.path.isdir(SDK_INSTALL_DIR) and os.path.isfile(
-        os.path.join(SDK_INSTALL_DIR, "sdk_version")
+    next_step(f"Downloading Zephyr SDK v{version} (minimal)...")
+    minimal_path = os.path.join(downloads_dir, paths["minimal_archive"])
+    if os.path.isdir(paths["install_dir"]) and os.path.isfile(
+        os.path.join(paths["install_dir"], "sdk_version")
     ):
         console.print("        [green]OK[/] Already extracted, skipping download")
     else:
         if not os.path.isfile(minimal_path):
-            url = f"{SDK_BASE_URL}/{MINIMAL_ARCHIVE}"
+            url = f"{paths['base_url']}/{paths['minimal_archive']}"
             _download(url, minimal_path, "minimal SDK", console)
         _extract_7z(minimal_path, SDK_DIR, "minimal SDK", console)
         console.print("        [green]OK[/] Minimal SDK extracted")
 
     # -- 8+. Download + extract toolchains ---------------------------------
+    extract_dir = _tc_extract_dir(paths["install_dir"])
     for tc_name in toolchains_to_install:
         tc = TOOLCHAINS[tc_name]
         archive_file = tc["archive"]
         archive_path = os.path.join(downloads_dir, archive_file)
-
-        if tc_name == "arm":
-            tc_dir = os.path.join(SDK_INSTALL_DIR, "arm-zephyr-eabi")
-        else:
-            tc_dir = os.path.join(SDK_INSTALL_DIR, "riscv64-zephyr-elf")
+        tc_installed_dir = _tc_dir(paths["install_dir"], tc_name)
 
         next_step(f"Installing {tc_name} toolchain...")
-        if os.path.isdir(tc_dir):
+        if os.path.isdir(tc_installed_dir):
             console.print(f"        [green]OK[/] {tc_name} already installed")
             continue
 
         if not os.path.isfile(archive_path):
-            url = f"{SDK_BASE_URL}/{archive_file}"
+            url = f"{paths['base_url']}/{archive_file}"
             _download(url, archive_path, tc["desc"], console)
 
-        _extract_7z(archive_path, SDK_INSTALL_DIR, tc_name, console)
+        _extract_7z(archive_path, extract_dir, tc_name, console)
         console.print(f"        [green]OK[/] {tc_name} toolchain installed")
 
     # -- Register SDK + zephyr-export --------------------------------------
     next_step("Registering SDK and CMake packages...")
-    _register_sdk(console)
+    _register_sdk(console, install_dir=paths["install_dir"])
     _run_zephyr_export(console)
 
     # -- Done --------------------------------------------------------------
     console.print()
     console.print("  [bold green]Workspace ready![/]")
     console.print(f"  Zephyr:       {zephyr_ref} ({source_label})")
-    console.print(f"  SDK:          .sdk/zephyr-sdk-{SDK_VERSION}/")
+    console.print(f"  SDK:          .sdk/zephyr-sdk-{version}/")
     console.print(f"  Toolchains:   {', '.join(toolchains_to_install)}")
     if not want_riscv:
         console.print(

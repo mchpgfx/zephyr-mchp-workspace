@@ -254,9 +254,8 @@ def main() -> int:
 
     # Warn if workspace is not yet initialised
     west_cfg = os.path.join(WORKSPACE_ROOT, ".west", "config")
-    sdk_marker = os.path.join(WORKSPACE_ROOT, ".sdk",
-                              f"zephyr-sdk-{sdk.SDK_VERSION}", "sdk_version")
-    if not os.path.isfile(west_cfg) or not os.path.isfile(sdk_marker):
+    has_sdk = sdk._find_installed_sdk_dir() is not None
+    if not os.path.isfile(west_cfg) or not has_sdk:
         console.print(
             "[yellow]Workspace not fully set up. Run [bold]/install[/] to bootstrap everything.[/]\n"
         )
