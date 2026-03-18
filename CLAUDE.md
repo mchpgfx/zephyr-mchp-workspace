@@ -29,7 +29,7 @@ All commands run through the interactive CLI or directly via batch/PowerShell en
 .\zephyr.bat /sdk --riscv
 
 # Build firmware
-.\zephyr.bat /build blinky -b sama7d65_curiosity
+.\zephyr.bat /build blinky -b sam_e70_xplained/same70q21
 
 # Scaffold new application
 .\zephyr.bat /create-app myapp
@@ -39,9 +39,15 @@ All commands run through the interactive CLI or directly via batch/PowerShell en
 
 # Update Zephyr and modules
 .\zephyr.bat /update
+
+# Workspace status (Zephyr, SDK, toolchains, modules, apps)
+.\zephyr.bat /status
 ```
 
-Within the interactive CLI, commands are prefixed with `/` (e.g., `/build blinky -b sam_e70_xplained`).
+Within the interactive CLI, commands are prefixed with `/` (e.g., `/build blinky -b sam_e70_xplained/same70q21`).
+Commands without `/` are passed to the shell with the full Zephyr environment (e.g., `west flash`, `west debug`, `cmake --version`).
+
+The SDK version is auto-detected from the Zephyr source (`FindHostTools.cmake`) — no hardcoded version.
 
 ## Architecture
 
@@ -65,7 +71,7 @@ Within the interactive CLI, commands are prefixed with `/` (e.g., `/build blinky
 ### CLI Module Structure (`tools/zephyr_cli/`)
 
 - **`cli.py`** — Main REPL loop, command dispatch, autocomplete (`ZephyrCompleter`)
-- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), board registry (`BOARDS` dict, `ALL_BOARDS` flat list), `get_apps()` helper, `run_cmd()` utility
+- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), board registry (`BOARDS` dict, `ALL_BOARDS` flat list), `get_apps()` helper, `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility
 - **`commands/`** — One module per command: `install.py`, `sdk.py`, `build.py`, `create_app.py`, `update.py`
 - Entry point: `__main__.py` calls `cli.main()`
 
@@ -84,7 +90,7 @@ Build system is CMake 3.20+ using Zephyr's CMake package. Board-specific configu
 
 ### Build Flow
 
-`/build <app> -b <board>` runs `west build -d build/<app> app/<app> -b <board>`. The build command injects the venv's `Scripts/` into PATH and sets `ZEPHYR_SDK_INSTALL_DIR` so CMake/ninja and the cross-compiler are found automatically.
+`/build <app> -b <board>` runs `west build -d build/<app> app/<app> -b <board>`. All commands (build, shell pass-through, etc.) use `zephyr_env()` from `config.py` which sets `PATH`, `ZEPHYR_BASE`, and `ZEPHYR_SDK_INSTALL_DIR` automatically.
 
 ## Board Families
 

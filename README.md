@@ -50,12 +50,23 @@ Launch the REPL for autocomplete and command history:
 | `/install [opts]` | Full workspace setup (venv, west, SDK, toolchain) |
 | `/build <app> -b <board>` | Build a Zephyr application |
 | `/create-app <name>` | Scaffold a new app under `app/` |
+| `/status` | Comprehensive workspace summary |
 | `/boards` | List supported boards |
 | `/apps` | List available applications |
 | `/sdk --status` | Show installed SDK and toolchains |
 | `/sdk --riscv` | Add RISC-V toolchain |
 | `/update` | Update Zephyr and modules |
 | `/clean [app]` | Remove build artifacts |
+
+Commands without `/` are passed directly to the shell with the Zephyr environment (`ZEPHYR_BASE`, `ZEPHYR_SDK_INSTALL_DIR`, venv `PATH`) fully configured:
+
+```
+zephyr > west flash
+zephyr > west debug
+zephyr > cmake --version
+```
+
+The SDK version is auto-detected from the Zephyr source — no manual version management needed.
 
 ## Supported Boards (33 targets)
 
