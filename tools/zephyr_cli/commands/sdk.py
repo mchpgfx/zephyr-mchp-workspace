@@ -252,27 +252,18 @@ def _extract_7z(archive: str, dest: str, label: str, console: Console) -> None:
             progress.update(task, completed=total_files, current_file="done")
 
 
-def _safe_tar_filter(member, dest_path):
-    """Tar extraction filter: block path traversal but allow SDK symlinks.
+def _extract_tar_xz(archive: str, dest: str, label: str, console: Console) -> None:
+    """Extract a .tar.xz archive with a rich progress bar.
 
-    The Zephyr SDK tarball contains symlinks with absolute targets baked in
-    from the build machine (e.g. liblto_plugin.so → /home/.../liblto_plugin.so).
-    The strict ``data`` filter rejects these.  Fall back to ``tar`` filter for
-    symlinks only — it still resets uid/gid but does not reject symlink targets.
+    Uses the strict ``data`` filter for regular members but falls back to
+    the permissive ``tar`` filter for symlinks — the Zephyr SDK tarball
+    contains symlinks with absolute targets baked in from the build machine
+    that the ``data`` filter rejects.  For Python < 3.12 (no filter support)
+    extraction proceeds without a filter.
     """
     import tarfile
 
-    try:
-        return tarfile.data_filter(member, dest_path)
-    except tarfile.OutsideDestinationError:
-        if not member.issym():
-            raise
-        return tarfile.tar_filter(member, dest_path)
-
-
-def _extract_tar_xz(archive: str, dest: str, label: str, console: Console) -> None:
-    """Extract a .tar.xz archive with a rich progress bar."""
-    import tarfile
+    has_filters = hasattr(tarfile, "data_filter")
 
     with tarfile.open(archive, "r:xz") as tf:
         members = tf.getmembers()
@@ -290,7 +281,24 @@ def _extract_tar_xz(archive: str, dest: str, label: str, console: Console) -> No
 
         with tarfile.open(archive, "r:xz") as tf:
             for i, member in enumerate(tf.getmembers()):
-                tf.extract(member, path=dest, filter=_safe_tar_filter)
+                if has_filters:
+                    # Python 3.12+: 'tar' filter allows symlinks, 'data' is strict
+                    filt = "tar" if member.issym() else "data"
+                    tf.extract(member, path=dest, filter=filt)
+                else:
+                    try:
+                        tf.extract(member, path=dest)
+                    except Exception:
+                        if not member.issym():
+                            raise
+                        # Ubuntu backports reject absolute symlink targets
+                        # even without filter support.  Create manually
+                        # (SDK archives are from a trusted source).
+                        link_path = os.path.join(dest, member.name)
+                        os.makedirs(os.path.dirname(link_path), exist_ok=True)
+                        if os.path.lexists(link_path):
+                            os.remove(link_path)
+                        os.symlink(member.linkname, link_path)
                 if i % 50 == 0:
                     progress.update(task, completed=i)
             progress.update(task, completed=total_files)
