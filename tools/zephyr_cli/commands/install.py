@@ -94,11 +94,13 @@ def _get_latest_stable(console: Console) -> str:
 def _write_manifest(revision: str, repo_url: str | None, console: Console) -> None:
     """Write manifest/west.yml with the specified Zephyr source."""
     if repo_url:
-        # Fork: strip trailing /zephyr if the user passed the full repo URL
-        if repo_url.rstrip("/").endswith("/zephyr"):
-            url_base = repo_url.rstrip("/").rsplit("/zephyr", 1)[0]
-        else:
-            url_base = repo_url.rstrip("/")
+        # Fork: strip trailing /zephyr or /zephyr.git so url-base is the org root
+        clean = repo_url.rstrip("/")
+        for suffix in ("/zephyr.git", "/zephyr"):
+            if clean.endswith(suffix):
+                clean = clean[: -len(suffix)]
+                break
+        url_base = clean
     else:
         url_base = DEFAULT_ZEPHYR_REPO
 

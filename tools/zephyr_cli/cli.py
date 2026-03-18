@@ -200,22 +200,48 @@ def _dispatch(cmd: str, args: list[str], console: Console) -> bool:
     return False
 
 
+def _normalize_cmd(arg: str) -> str | None:
+    """Normalize a CLI arg to a /command.
+
+    Handles Git Bash MSYS path mangling: /install may arrive as
+    C:/Program Files/Git/install or /c/Program Files/Git/install.
+    """
+    # Direct match: /install, /help, etc.
+    if arg in HANDLERS or arg in ("/quit", "/exit"):
+        return arg
+
+    # Might be a mangled MSYS path — extract last component
+    if "/" in arg:
+        base = "/" + arg.rsplit("/", 1)[-1]
+        if base in HANDLERS or base in ("/quit", "/exit"):
+            return base
+
+    return None
+
+
 def main() -> int:
     console = Console()
 
     # One-shot mode: zephyr.bat /install --riscv  (run command and exit)
     cli_args = sys.argv[1:]
-    if cli_args and cli_args[0].startswith("/"):
-        cmd = cli_args[0]
-        args = cli_args[1:]
-        if not _dispatch(cmd, args, console):
-            console.print(
-                f"  [red]Unknown command:[/] {cmd}  — type [bold]/help[/] for commands"
-            )
-            return 1
-        return 0
+    if cli_args:
+        cmd = _normalize_cmd(cli_args[0])
+        if cmd:
+            args = cli_args[1:]
+            if not _dispatch(cmd, args, console):
+                console.print(
+                    f"  [red]Unknown command:[/] {cmd}  — type [bold]/help[/] for commands"
+                )
+                return 1
+            return 0
 
     # Interactive REPL mode
+    if not sys.stdout.isatty():
+        console.print("[red]Error:[/] No interactive terminal. Use one-shot mode:")
+        console.print("  zephyr.bat /install [options]")
+        console.print("  zephyr.bat /help")
+        return 1
+
     console.print(
         Panel(
             "[bold]Zephyr Workspace CLI[/]\n"
