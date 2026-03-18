@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -24,8 +25,8 @@ from .commands import install, update, build, create_app, sdk
 # ── Autocomplete ──────────────────────────────────────────────────
 
 COMMANDS = {
-    "/install":     "Set up workspace (venv, west init, west update)",
-    "/sdk":         "Install Zephyr SDK + CMake:  /sdk [--all | --riscv]",
+    "/install":     "Full setup (venv, west, SDK, toolchain):  /install [--all | --riscv]",
+    "/sdk":         "Manage SDK toolchains:  /sdk [--status | --riscv | --all]",
     "/update":      "Update Zephyr and modules",
     "/build":       "Build an application:  /build <app> -b <board>",
     "/create-app":  "Scaffold a new application",
@@ -78,6 +79,17 @@ class ZephyrCompleter(Completer):
                 for b in ALL_BOARDS:
                     if b.startswith(words[3]):
                         yield Completion(b, start_position=-len(words[3]))
+
+        # /install completions
+        elif cmd == "/install":
+            install_opts = ["--all", "--riscv"]
+            if n == 1 and text.endswith(" "):
+                for o in install_opts:
+                    yield Completion(o)
+            elif n == 2 and not text.endswith(" "):
+                for o in install_opts:
+                    if o.startswith(words[1]):
+                        yield Completion(o, start_position=-len(words[1]))
 
         # /sdk completions
         elif cmd == "/sdk":
@@ -163,9 +175,40 @@ HANDLERS = {
 
 # ── Main REPL ─────────────────────────────────────────────────────
 
+def _dispatch(cmd: str, args: list[str], console: Console) -> bool:
+    """Run a single command. Returns True if handled."""
+    if cmd in ("/quit", "/exit"):
+        console.print("[dim]Goodbye![/]")
+        return True
+
+    handler = HANDLERS.get(cmd)
+    if handler:
+        try:
+            handler(args, console)
+        except KeyboardInterrupt:
+            console.print("\n  [yellow]Interrupted[/]")
+        except Exception as exc:
+            console.print(f"  [red]Error: {exc}[/]")
+        return True
+    return False
+
+
 def main() -> int:
     console = Console()
 
+    # One-shot mode: zephyr.bat /install --riscv  (run command and exit)
+    cli_args = sys.argv[1:]
+    if cli_args and cli_args[0].startswith("/"):
+        cmd = cli_args[0]
+        args = cli_args[1:]
+        if not _dispatch(cmd, args, console):
+            console.print(
+                f"  [red]Unknown command:[/] {cmd}  — type [bold]/help[/] for commands"
+            )
+            return 1
+        return 0
+
+    # Interactive REPL mode
     console.print(
         Panel(
             "[bold]Zephyr Workspace CLI[/]\n"
@@ -178,9 +221,11 @@ def main() -> int:
 
     # Warn if workspace is not yet initialised
     west_cfg = os.path.join(WORKSPACE_ROOT, ".west", "config")
-    if not os.path.isfile(west_cfg):
+    sdk_marker = os.path.join(WORKSPACE_ROOT, ".sdk",
+                              f"zephyr-sdk-{sdk.SDK_VERSION}", "sdk_version")
+    if not os.path.isfile(west_cfg) or not os.path.isfile(sdk_marker):
         console.print(
-            "[yellow]Workspace not initialised. Run [bold]/install[/] first.[/]\n"
+            "[yellow]Workspace not fully set up. Run [bold]/install[/] to bootstrap everything.[/]\n"
         )
 
     history_file = os.path.join(WORKSPACE_ROOT, ".zephyr_cli_history")
@@ -213,15 +258,7 @@ def main() -> int:
             console.print("[dim]Goodbye![/]")
             break
 
-        handler = HANDLERS.get(cmd)
-        if handler:
-            try:
-                handler(args, console)
-            except KeyboardInterrupt:
-                console.print("\n  [yellow]Interrupted[/]")
-            except Exception as exc:
-                console.print(f"  [red]Error: {exc}[/]")
-        else:
+        if not _dispatch(cmd, args, console):
             console.print(
                 f"  [red]Unknown command:[/] {cmd}  — type [bold]/help[/] for commands"
             )

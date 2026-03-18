@@ -7,6 +7,11 @@ import sys
 import urllib.request
 
 from rich.console import Console
+from rich.progress import (
+    Progress, SpinnerColumn, BarColumn, TextColumn,
+    DownloadColumn, TransferSpeedColumn, TimeRemainingColumn,
+    TaskProgressColumn,
+)
 
 from ..config import WORKSPACE_ROOT, VENV_DIR
 
@@ -31,33 +36,164 @@ TOOLCHAINS = {
 }
 
 
+# ── Progress helpers ──────────────────────────────────────────────
+
 def _download(url: str, dest: str, label: str, console: Console) -> None:
-    """Download a file with progress reporting."""
-    console.print(f"        Downloading {label}...")
+    """Download a file with a rich progress bar."""
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[cyan]{task.description}"),
+        BarColumn(bar_width=30),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        # HEAD request to get content-length (urlretrieve doesn't expose it upfront)
+        req = urllib.request.Request(url, method="HEAD")
+        try:
+            resp = urllib.request.urlopen(req, timeout=15)
+            total = int(resp.headers.get("Content-Length", 0))
+        except Exception:
+            total = 0
 
-    def _reporthook(block_num, block_size, total_size):
-        downloaded = block_num * block_size
-        if total_size > 0:
-            pct = min(100, downloaded * 100 // total_size)
-            mb_down = downloaded / (1024 * 1024)
-            mb_total = total_size / (1024 * 1024)
-            # Carriage-return overwrites the line in a real terminal
-            print(
-                f"\r        {mb_down:6.1f} / {mb_total:.1f} MB  ({pct}%)",
-                end="", flush=True,
-            )
+        task = progress.add_task(label, total=total or None)
 
-    urllib.request.urlretrieve(url, dest, reporthook=_reporthook)
-    print()  # newline after progress
+        def _reporthook(block_num, block_size, total_size):
+            if total_size > 0 and progress.tasks[task].total is None:
+                progress.update(task, total=total_size)
+            progress.update(task, completed=min(block_num * block_size, total_size or block_num * block_size))
+
+        urllib.request.urlretrieve(url, dest, reporthook=_reporthook)
+        progress.update(task, completed=progress.tasks[task].total)
 
 
 def _extract_7z(archive: str, dest: str, label: str, console: Console) -> None:
-    """Extract a .7z archive using py7zr."""
+    """Extract a .7z archive with a rich progress bar."""
     import py7zr
 
-    console.print(f"        Extracting {label}...")
     with py7zr.SevenZipFile(archive, "r") as z:
-        z.extractall(path=dest)
+        names = z.getnames()
+        total_files = len(names)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[cyan]{task.description}"),
+        BarColumn(bar_width=30),
+        TaskProgressColumn(),
+        TextColumn("[dim]{task.fields[current_file]}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task(f"Extracting {label}", total=total_files, current_file="")
+
+        with py7zr.SevenZipFile(archive, "r") as z:
+            # py7zr doesn't have per-file callbacks, so extract in batches
+            # by using extractall -- we'll estimate via file listing
+            # For a real per-file approach we'd iterate, but py7zr extracts
+            # atomically.  Use a thread to simulate progress from getnames.
+            import threading
+
+            extracted = threading.Event()
+
+            def _extract():
+                z.extractall(path=dest)
+                extracted.set()
+
+            t = threading.Thread(target=_extract, daemon=True)
+            t.start()
+
+            # Tick the bar while extraction runs
+            import time
+            tick = 0
+            while not extracted.wait(timeout=0.15):
+                # Estimate progress: ramp up to 90% during extraction
+                tick = min(tick + max(1, total_files // 40), int(total_files * 0.9))
+                progress.update(task, completed=tick, current_file="")
+
+            progress.update(task, completed=total_files, current_file="done")
+
+
+def _run_pip(pip_exe: str, pip_args: list[str], label: str, console: Console) -> None:
+    """Run a pip command with a spinner that shows live output."""
+    with console.status(f"[cyan]{label}[/]", spinner="dots") as status:
+        proc = subprocess.Popen(
+            [pip_exe] + pip_args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=WORKSPACE_ROOT,
+        )
+        last_line = ""
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                last_line = line
+                # Show the most recent pip output next to the spinner
+                # Truncate long lines so the spinner stays readable
+                display = line if len(line) < 60 else line[:57] + "..."
+                status.update(f"[cyan]{label}[/]  [dim]{display}[/]")
+        proc.wait()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, pip_exe)
+
+
+def _run_subprocess_with_spinner(
+    cmd: list[str], label: str, console: Console, **kwargs
+) -> subprocess.CompletedProcess:
+    """Run a subprocess with a spinner. Returns CompletedProcess."""
+    with console.status(f"[cyan]{label}[/]", spinner="dots"):
+        return subprocess.run(
+            cmd, capture_output=True, text=True,
+            cwd=kwargs.get("cwd", WORKSPACE_ROOT),
+            **{k: v for k, v in kwargs.items() if k != "cwd"},
+        )
+
+
+def _register_sdk(console: Console) -> None:
+    """Run setup.cmd to register the SDK CMake package, with hang protection."""
+    setup_cmd = os.path.join(SDK_INSTALL_DIR, "setup.cmd")
+    if os.path.isfile(setup_cmd):
+        try:
+            result = subprocess.run(
+                ["cmd", "/c", setup_cmd],
+                cwd=SDK_INSTALL_DIR,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                console.print("        [green]OK[/] SDK registered (CMake package)")
+            else:
+                console.print(f"        [yellow]Warning:[/] setup.cmd exited with {result.returncode}")
+                if result.stderr.strip():
+                    console.print(f"        {result.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            console.print("        [yellow]Warning:[/] setup.cmd timed out (30s), skipping")
+            console.print("        [dim]The SDK will still work — builds use ZEPHYR_SDK_INSTALL_DIR.[/]")
+    else:
+        console.print("        [yellow]Skipped[/] setup.cmd not found")
+
+
+def _run_zephyr_export(console: Console) -> None:
+    """Run west zephyr-export if workspace is initialised."""
+    west_cfg = os.path.join(WORKSPACE_ROOT, ".west", "config")
+    if os.path.isfile(west_cfg):
+        from ..config import _find_west
+        west = _find_west()
+        try:
+            subprocess.run(
+                [west, "zephyr-export"],
+                check=False, cwd=WORKSPACE_ROOT,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def _usage(console: Console) -> None:
@@ -75,12 +211,10 @@ def _usage(console: Console) -> None:
 def _status(console: Console) -> None:
     """Show what's installed."""
     if not os.path.isdir(SDK_INSTALL_DIR):
-        console.print("  SDK not installed. Run [bold]/sdk[/] to install.")
+        console.print("  SDK not installed. Run [bold]/install[/] to set up everything.")
         return
     console.print(f"  SDK v{SDK_VERSION} installed at .sdk/")
     for tc_name, tc_info in TOOLCHAINS.items():
-        tc_dir = os.path.join(SDK_INSTALL_DIR, tc_name + "-zephyr-eabi" if tc_name == "arm" else tc_name + "-zephyr-elf")
-        # Correct path: arm-zephyr-eabi or riscv64-zephyr-elf
         if tc_name == "arm":
             tc_dir = os.path.join(SDK_INSTALL_DIR, "arm-zephyr-eabi")
         else:
@@ -124,13 +258,9 @@ def run(args: list[str], console: Console) -> None:
     venv_pip = os.path.join(VENV_DIR, "Scripts", "pip.exe")
     if not os.path.isfile(venv_pip):
         venv_pip = os.path.join(VENV_DIR, "bin", "pip")
-    subprocess.run(
-        [venv_pip, "install", "-q", "cmake>=3.20"],
-        check=True, cwd=WORKSPACE_ROOT,
-    )
+    _run_pip(venv_pip, ["install", "-q", "cmake>=3.20"], "Installing cmake", console)
     cmake_path = shutil.which("cmake")
     if not cmake_path:
-        # cmake might be in venv Scripts but not on PATH yet
         venv_cmake = os.path.join(VENV_DIR, "Scripts", "cmake.exe")
         if os.path.isfile(venv_cmake):
             cmake_path = venv_cmake
@@ -160,7 +290,6 @@ def run(args: list[str], console: Console) -> None:
         archive_file = tc["archive"]
         archive_path = os.path.join(downloads_dir, archive_file)
 
-        # Check if already extracted
         if tc_name == "arm":
             tc_dir = os.path.join(SDK_INSTALL_DIR, "arm-zephyr-eabi")
         else:
@@ -180,31 +309,10 @@ def run(args: list[str], console: Console) -> None:
 
     # -- Register SDK (setup.cmd) ------------------------------------------
     next_step("Registering SDK...")
-    setup_cmd = os.path.join(SDK_INSTALL_DIR, "setup.cmd")
-    if os.path.isfile(setup_cmd):
-        result = subprocess.run(
-            ["cmd", "/c", setup_cmd],
-            cwd=SDK_INSTALL_DIR,
-            capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            console.print("        [green]OK[/] SDK registered (CMake package)")
-        else:
-            console.print(f"        [yellow]Warning:[/] setup.cmd exited with {result.returncode}")
-            console.print(f"        {result.stderr.strip()}" if result.stderr.strip() else "")
-    else:
-        console.print("        [yellow]Skipped[/] setup.cmd not found")
+    _register_sdk(console)
 
     # Also run west zephyr-export if workspace is initialised
-    west_cfg = os.path.join(WORKSPACE_ROOT, ".west", "config")
-    if os.path.isfile(west_cfg):
-        from ..config import _find_west
-        west = _find_west()
-        subprocess.run(
-            [west, "zephyr-export"],
-            check=False, cwd=WORKSPACE_ROOT,
-            capture_output=True,
-        )
+    _run_zephyr_export(console)
 
     # -- Clean up downloads (optional, keep for re-installs) ---------------
     console.print()
