@@ -26,12 +26,16 @@ git clone <this-repo> && cd zephyr-mchp-workspace
 .\zephyr.bat /install --stable                # latest stable release from GitHub
 .\zephyr.bat /install --latest                # Zephyr main branch (bleeding edge)
 .\zephyr.bat /install --zephyr-ref v4.2.1     # specific tag / branch / SHA
-.\zephyr.bat /install --zephyr-repo https://github.com/you/zephyr   # use a fork
+.\zephyr.bat /install --zephyr-repo https://github.com/you/zephyr              # use a fork
+.\zephyr.bat /install --zephyr-repo https://github.com/you/zephyr --latest     # fork, main branch
+.\zephyr.bat /install --zephyr-repo https://github.com/you/zephyr --zephyr-ref my-branch  # fork, specific branch
 .\zephyr.bat /install --riscv                 # also install RISC-V toolchain
 .\zephyr.bat /install --all                   # all toolchains
 ```
 
 Flags can be combined: `.\zephyr.bat /install --stable --riscv`
+
+To track the latest commits on a fork instead of a pinned tag, use `--latest` or `--zephyr-ref <branch>` so `west update` pulls HEAD rather than a frozen revision.
 
 ## Interactive CLI
 
