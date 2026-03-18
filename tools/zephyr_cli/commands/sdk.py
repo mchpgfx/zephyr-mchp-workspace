@@ -252,6 +252,24 @@ def _extract_7z(archive: str, dest: str, label: str, console: Console) -> None:
             progress.update(task, completed=total_files, current_file="done")
 
 
+def _safe_tar_filter(member, dest_path):
+    """Tar extraction filter: block path traversal but allow SDK symlinks.
+
+    The Zephyr SDK tarball contains symlinks with absolute targets baked in
+    from the build machine (e.g. liblto_plugin.so → /home/.../liblto_plugin.so).
+    The strict ``data`` filter rejects these.  Fall back to ``tar`` filter for
+    symlinks only — it still resets uid/gid but does not reject symlink targets.
+    """
+    import tarfile
+
+    try:
+        return tarfile.data_filter(member, dest_path)
+    except tarfile.OutsideDestinationError:
+        if not member.issym():
+            raise
+        return tarfile.tar_filter(member, dest_path)
+
+
 def _extract_tar_xz(archive: str, dest: str, label: str, console: Console) -> None:
     """Extract a .tar.xz archive with a rich progress bar."""
     import tarfile
@@ -272,7 +290,7 @@ def _extract_tar_xz(archive: str, dest: str, label: str, console: Console) -> No
 
         with tarfile.open(archive, "r:xz") as tf:
             for i, member in enumerate(tf.getmembers()):
-                tf.extract(member, path=dest, filter="data")
+                tf.extract(member, path=dest, filter=_safe_tar_filter)
                 if i % 50 == 0:
                     progress.update(task, completed=i)
             progress.update(task, completed=total_files)
