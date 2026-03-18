@@ -6,7 +6,7 @@ import time
 
 from rich.console import Console
 
-from ..config import WORKSPACE_ROOT, APP_DIR, BUILD_DIR, VENV_DIR, WEST_EXE, ALL_BOARDS, get_apps
+from ..config import WORKSPACE_ROOT, APP_DIR, BUILD_DIR, WEST_EXE, ALL_BOARDS, get_apps, zephyr_env
 
 
 def _usage(console: Console) -> None:
@@ -57,21 +57,7 @@ def run(args: list[str], console: Console) -> None:
         app_src,
     ] + extra
 
-    # Ensure the venv tools (cmake, python) and SDK are visible to west build
-    env = os.environ.copy()
-    venv_scripts = os.path.join(VENV_DIR, "Scripts")
-    if os.path.isdir(venv_scripts):
-        env["PATH"] = venv_scripts + os.pathsep + env.get("PATH", "")
-    # Find the SDK directory (pick the first zephyr-sdk-* found)
-    sdk_dir = None
-    sdk_base = os.path.join(WORKSPACE_ROOT, ".sdk")
-    if os.path.isdir(sdk_base):
-        for d in os.listdir(sdk_base):
-            if d.startswith("zephyr-sdk-") and os.path.isdir(os.path.join(sdk_base, d)):
-                sdk_dir = os.path.join(sdk_base, d)
-                break
-    if sdk_dir and os.path.isdir(sdk_dir):
-        env["ZEPHYR_SDK_INSTALL_DIR"] = sdk_dir
+    env = zephyr_env()
 
     t0 = time.time()
     proc = subprocess.Popen(

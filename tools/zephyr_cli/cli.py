@@ -17,7 +17,7 @@ from rich.table import Table
 
 from .config import (
     WORKSPACE_ROOT, WEST_EXE, ALL_BOARDS, BOARDS,
-    get_apps, BUILD_DIR,
+    get_apps, BUILD_DIR, VENV_DIR, zephyr_env,
 )
 from .commands import install, update, build, create_app, sdk
 
@@ -30,6 +30,7 @@ COMMANDS = {
     "/update":      "Update Zephyr and modules",
     "/build":       "Build an application:  /build <app> -b <board>",
     "/create-app":  "Scaffold a new application",
+    "/status":      "Show workspace status (Zephyr, SDK, toolchains, apps)",
     "/boards":      "List supported Microchip/Atmel boards",
     "/apps":        "List available applications",
     "/clean":       "Remove build artifacts:  /clean [app]",
@@ -158,6 +159,143 @@ def cmd_clean(args, console):
             console.print("  [yellow]Nothing to clean[/]")
 
 
+def cmd_status(args, console):
+    """Comprehensive workspace status."""
+    from .commands.sdk import _find_installed_sdk_dir, _detect_min_sdk_version, _tc_dir, TOOLCHAINS
+    from .commands.install import _read_current_manifest
+
+    # Zephyr source
+    zephyr_dir = os.path.join(WORKSPACE_ROOT, "zephyr")
+    console.print("  [bold cyan]Zephyr[/]")
+    if os.path.isdir(zephyr_dir):
+        # Read version from VERSION file
+        ver_file = os.path.join(zephyr_dir, "VERSION")
+        zephyr_ver = ""
+        if os.path.isfile(ver_file):
+            parts = {}
+            with open(ver_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.split("=", 1)
+                        parts[k.strip()] = v.strip()
+            zephyr_ver = "{}.{}.{}".format(
+                parts.get("VERSION_MAJOR", "?"),
+                parts.get("VERSION_MINOR", "?"),
+                parts.get("PATCHLEVEL", "?"),
+            )
+            extra = parts.get("EXTRAVERSION", "")
+            if extra:
+                zephyr_ver += f"-{extra}"
+        ref, url_base = _read_current_manifest()
+        console.print(f"    Version:    {zephyr_ver or '?'}")
+        console.print(f"    Revision:   {ref}")
+        console.print(f"    Source:     {url_base}")
+        console.print(f"    Path:       zephyr/")
+    else:
+        console.print("    [yellow]Not installed[/] — run /install")
+
+    # West
+    console.print()
+    console.print("  [bold cyan]West[/]")
+    west_cfg = os.path.join(WORKSPACE_ROOT, ".west", "config")
+    if os.path.isfile(west_cfg):
+        from .config import _find_west
+        west = _find_west()
+        try:
+            result = subprocess.run(
+                [west, "--version"], capture_output=True, text=True, timeout=5,
+            )
+            west_ver = result.stdout.strip()
+        except Exception:
+            west_ver = "installed"
+        console.print(f"    {west_ver}")
+    else:
+        console.print("    [yellow]Not initialized[/]")
+
+    # SDK
+    console.print()
+    console.print("  [bold cyan]SDK[/]")
+    sdk_dir = _find_installed_sdk_dir()
+    if sdk_dir:
+        ver_file = os.path.join(sdk_dir, "sdk_version")
+        try:
+            with open(ver_file) as f:
+                sdk_ver = f.read().strip()
+        except OSError:
+            sdk_ver = os.path.basename(sdk_dir).replace("zephyr-sdk-", "")
+        console.print(f"    Version:    {sdk_ver}")
+        console.print(f"    Path:       {os.path.relpath(sdk_dir, WORKSPACE_ROOT)}/")
+
+        min_ver = _detect_min_sdk_version()
+        if min_ver:
+            console.print(f"    Required:   >= {min_ver}")
+
+        for tc_name, tc_info in TOOLCHAINS.items():
+            installed = os.path.isdir(_tc_dir(sdk_dir, tc_name))
+            mark = "[green]OK[/]" if installed else "[dim]--[/]"
+            console.print(f"    {mark} {tc_name:10s}  {tc_info['desc']}")
+    else:
+        console.print("    [yellow]Not installed[/] — run /install")
+
+    # CMake
+    cmake_path = shutil.which("cmake")
+    if not cmake_path:
+        venv_cmake = os.path.join(VENV_DIR, "Scripts", "cmake.exe")
+        if os.path.isfile(venv_cmake):
+            cmake_path = venv_cmake
+    if cmake_path:
+        try:
+            result = subprocess.run(
+                [cmake_path, "--version"], capture_output=True, text=True, timeout=5,
+            )
+            cmake_ver = result.stdout.splitlines()[0] if result.stdout else "?"
+        except Exception:
+            cmake_ver = cmake_path
+        console.print(f"    [green]OK[/] {cmake_ver}")
+    else:
+        console.print(f"    [dim]--[/] cmake not found")
+
+    # Modules
+    console.print()
+    console.print("  [bold cyan]Modules[/]")
+    modules_dir = os.path.join(WORKSPACE_ROOT, "modules")
+    if os.path.isdir(modules_dir):
+        from .config import _find_west
+        west = _find_west()
+        try:
+            result = subprocess.run(
+                [west, "list", "--format", "{name:16s} {path:36s} {revision}"],
+                capture_output=True, text=True, cwd=WORKSPACE_ROOT, timeout=10,
+            )
+            if result.returncode == 0:
+                for ln in result.stdout.strip().splitlines():
+                    console.print(f"    [dim]{ln}[/]")
+        except Exception:
+            console.print("    [dim](could not list)[/]")
+    else:
+        console.print("    [yellow]Not fetched[/]")
+
+    # Apps
+    console.print()
+    console.print("  [bold cyan]Applications[/]")
+    apps = get_apps()
+    if apps:
+        for a in apps:
+            has_build = os.path.isdir(os.path.join(BUILD_DIR, a))
+            mark = "[green]OK[/]" if has_build else "[dim]  [/]"
+            console.print(f"    {mark} {a}")
+    else:
+        console.print("    [dim](none)[/]")
+
+    # Environment
+    console.print()
+    console.print("  [bold cyan]Environment[/]")
+    env = zephyr_env()
+    console.print(f"    ZEPHYR_BASE:            {env.get('ZEPHYR_BASE', '[dim]not set[/]')}")
+    console.print(f"    ZEPHYR_SDK_INSTALL_DIR:  {env.get('ZEPHYR_SDK_INSTALL_DIR', '[dim]not set[/]')}")
+
+
 def cmd_help(args, console):
     table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 2))
     table.add_column(style="bold cyan")
@@ -165,6 +303,9 @@ def cmd_help(args, console):
     for cmd, desc in COMMANDS.items():
         table.add_row(cmd, desc)
     console.print(table)
+    console.print()
+    console.print("[dim]  Commands without / are passed to the shell with the Zephyr environment.[/]")
+    console.print("[dim]  Example: west flash, west debug, cmake --version[/]")
 
 
 HANDLERS = {
@@ -173,11 +314,37 @@ HANDLERS = {
     "/update":     update.run,
     "/build":      build.run,
     "/create-app": create_app.run,
+    "/status":     cmd_status,
     "/boards":     cmd_boards,
     "/apps":       cmd_apps,
     "/clean":      cmd_clean,
     "/help":       cmd_help,
 }
+
+
+# ── Shell pass-through ───────────────────────────────────────────
+
+def _run_shell(text: str, console: Console) -> None:
+    """Execute an arbitrary command with the Zephyr environment."""
+    env = zephyr_env()
+    try:
+        proc = subprocess.Popen(
+            text,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=WORKSPACE_ROOT,
+            env=env,
+        )
+        for line in proc.stdout:
+            console.print(f"  [dim]{line.rstrip()}[/]")
+        proc.wait()
+        if proc.returncode != 0:
+            console.print(f"  [yellow]Exit code {proc.returncode}[/]")
+    except Exception as exc:
+        console.print(f"  [red]Error: {exc}[/]")
 
 
 # ── Main REPL ─────────────────────────────────────────────────────
@@ -246,7 +413,8 @@ def main() -> int:
         Panel(
             "[bold]Zephyr Workspace CLI[/]\n"
             "[dim]Microchip / Atmel board support[/]\n\n"
-            "Type [bold cyan]/help[/] for commands, [bold cyan]Tab[/] to autocomplete",
+            "Type [bold cyan]/help[/] for commands, [bold cyan]Tab[/] to autocomplete\n"
+            "[dim]Commands without / are passed to the shell (e.g. west flash)[/]",
             border_style="cyan",
             padding=(1, 3),
         )
@@ -290,10 +458,14 @@ def main() -> int:
             console.print("[dim]Goodbye![/]")
             break
 
-        if not _dispatch(cmd, args, console):
-            console.print(
-                f"  [red]Unknown command:[/] {cmd}  — type [bold]/help[/] for commands"
-            )
+        if cmd.startswith("/"):
+            if not _dispatch(cmd, args, console):
+                console.print(
+                    f"  [red]Unknown command:[/] {cmd}  — type [bold]/help[/] for commands"
+                )
+        else:
+            # Shell pass-through: run arbitrary commands with Zephyr env
+            _run_shell(text, console)
 
         console.print()  # blank line between commands
 

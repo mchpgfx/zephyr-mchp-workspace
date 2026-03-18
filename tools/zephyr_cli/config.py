@@ -89,6 +89,36 @@ def get_apps():
         if os.path.isdir(os.path.join(APP_DIR, d))
     )
 
+def zephyr_env() -> dict:
+    """Return an os.environ copy with venv, SDK, and ZEPHYR_BASE configured."""
+    env = os.environ.copy()
+
+    # Venv Scripts on PATH
+    venv_scripts = os.path.join(VENV_DIR, "Scripts")
+    if not os.path.isdir(venv_scripts):
+        venv_scripts = os.path.join(VENV_DIR, "bin")
+    if os.path.isdir(venv_scripts):
+        env["PATH"] = venv_scripts + os.pathsep + env.get("PATH", "")
+
+    # ZEPHYR_BASE
+    zephyr_base = os.path.join(WORKSPACE_ROOT, "zephyr")
+    if os.path.isdir(zephyr_base):
+        env["ZEPHYR_BASE"] = zephyr_base
+
+    # SDK install dir (pick newest)
+    sdk_base = os.path.join(WORKSPACE_ROOT, ".sdk")
+    if os.path.isdir(sdk_base):
+        for d in sorted(os.listdir(sdk_base), reverse=True):
+            full = os.path.join(sdk_base, d)
+            if d.startswith("zephyr-sdk-") and os.path.isfile(
+                os.path.join(full, "sdk_version")
+            ):
+                env["ZEPHYR_SDK_INSTALL_DIR"] = full
+                break
+
+    return env
+
+
 def run_cmd(cmd, cwd=None, stream=True):
     """Run a command, optionally streaming stdout line-by-line.
     Returns (returncode, list_of_output_lines).
