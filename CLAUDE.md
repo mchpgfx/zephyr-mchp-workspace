@@ -88,7 +88,9 @@ Build system is CMake 3.20+ using Zephyr's CMake package. Board-specific configu
 
 ## Board Families
 
-Six families are supported (28 boards total), defined in `tools/zephyr_cli/config.py`:
+Six families are supported (33 board targets), defined in `tools/zephyr_cli/config.py`.
+Board targets use Zephyr v4.x qualified format: `board_name/soc_qualifier`.
+
 - **Atmel SAM** (Cortex-M): sam4e_xpro, sam_e70_xplained, sam_v71_xult, etc.
 - **Atmel SAM0** (Cortex-M0+): samd20/21_xpro, same54_xpro, samr21/34_xpro, etc.
 - **Microchip MEC** (Cortex-M): mec15xx/172x evaluation boards

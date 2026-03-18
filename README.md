@@ -16,7 +16,7 @@ Everything else (west, CMake, ninja, Zephyr SDK, cross-compilers) is installed a
 git clone <this-repo> && cd zephyr-mchp-workspace
 
 .\zephyr.bat /install              # full setup: venv, Zephyr, SDK, ARM toolchain
-.\zephyr.bat /build blinky -b sam_e70_xplained
+.\zephyr.bat /build blinky -b sam_e70_xplained/same70q21
 ```
 
 ## Install Options
@@ -53,16 +53,18 @@ Launch the REPL for autocomplete and command history:
 | `/update` | Update Zephyr and modules |
 | `/clean [app]` | Remove build artifacts |
 
-## Supported Boards (28)
+## Supported Boards (33 targets)
 
-| Family | Boards |
-|--------|--------|
-| Atmel SAM | sam4e_xpro, sam4l_ek, sam4s_xplained, sam_e70_xplained, sam_v71_xult |
+Board targets use Zephyr v4.x qualified format: `board/soc`. Run `/boards` for the full list.
+
+| Family | Targets |
+|--------|---------|
+| Atmel SAM | sam4e_xpro/sam4e16e, sam4l_ek/sam4lc4c, sam4s_xplained/sam4s16c, sam_e70_xplained/same70q21[b], sam_v71_xult/samv71q21[b] |
 | Atmel SAM0 | samc21n_xpro, samd20_xpro, samd21_xpro, same54_xpro, saml21_xpro, samr21_xpro, samr34_xpro |
-| Microchip MEC | mec1501modular_assy6885, mec15xxevb_assy6853, mec172xevb_assy6906, mec172xmodular_assy6930, mec_assy6941 |
+| Microchip MEC | mec1501modular_assy6885, mec15xxevb_assy6853, mec172xevb_assy6906, mec172xmodular_assy6930, mec_assy6941/{4 SoCs} |
 | Microchip PIC32 | pic32cm_jh01_cnano, pic32cm_jh01_cpro, pic32cx_sg61_cult, pic32cz_ca80_cult |
-| Microchip SAM | sam_e54_xpro, sama7d65_curiosity, sama7g54_ek |
-| Microchip Other | mpfs_icicle (RISC-V), m2gl025_miv (RISC-V), ev11l78a |
+| Microchip SAM | sam_e54_xpro/atsame54p20a, sama7d65_curiosity/sama7d65, sama7g54_ek/sama7g54 |
+| Microchip Other | mpfs_icicle/polarfire[/smp] (RISC-V), m2gl025_miv/miv (RISC-V), ev11l78a/samd20e16 |
 
 ## Project Layout
 
