@@ -14,6 +14,7 @@ All commands run through the interactive CLI or directly via batch/PowerShell en
 # Launch interactive CLI (REPL with autocomplete)
 .\zephyr.bat            # Windows cmd
 .\zephyr.ps1            # PowerShell
+./zephyr.sh             # Linux / macOS
 
 # First-time setup (venv, west, SDK, ARM toolchain — everything)
 .\zephyr.bat /install                         # pinned stable (v4.3.0)
@@ -30,6 +31,10 @@ All commands run through the interactive CLI or directly via batch/PowerShell en
 
 # Build firmware
 .\zephyr.bat /build blinky -b sam_e70_xplained/same70q21
+
+# Flash firmware
+.\zephyr.bat /flash blinky
+.\zephyr.bat /flash blinky --runner jlink
 
 # Scaffold new application
 .\zephyr.bat /create-app myapp
@@ -49,6 +54,8 @@ Commands without `/` are passed to the shell with the full Zephyr environment (e
 
 The SDK version is auto-detected from the Zephyr source (`FindHostTools.cmake`) — no hardcoded version.
 
+When using a fork with a branch revision (not a tag or SHA), `zephyr/` is checked out on that branch after `west update` so you can commit and push directly instead of working in detached HEAD.
+
 ## Architecture
 
 ### Workspace Layout
@@ -57,7 +64,8 @@ The SDK version is auto-detected from the Zephyr source (`FindHostTools.cmake`) 
 - **`app/`** — Application source code. Each subdirectory is a buildable Zephyr application with its own `CMakeLists.txt`, `prj.conf`, and `src/`.
 - **`tools/zephyr_cli/`** — Custom Python interactive CLI (REPL) built with `prompt_toolkit` + `rich`.
 - **`scripts/setup.ps1`** — PowerShell bootstrap script (venv, pip, west init, west update, zephyr-export).
-- **`zephyr.bat` / `zephyr.ps1`** — Entry points that auto-create venv and launch `python -m tools.zephyr_cli`.
+- **`zephyr.bat` / `zephyr.ps1`** — Windows entry points that auto-create venv and launch `python -m tools.zephyr_cli`.
+- **`zephyr.sh`** — Linux/macOS entry point (bash equivalent of `zephyr.bat`).
 
 ### Directories created at runtime (gitignored)
 
@@ -71,8 +79,8 @@ The SDK version is auto-detected from the Zephyr source (`FindHostTools.cmake`) 
 ### CLI Module Structure (`tools/zephyr_cli/`)
 
 - **`cli.py`** — Main REPL loop, command dispatch, autocomplete (`ZephyrCompleter`)
-- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), board registry (`BOARDS` dict, `ALL_BOARDS` flat list), `get_apps()` helper, `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility
-- **`commands/`** — One module per command: `install.py`, `sdk.py`, `build.py`, `create_app.py`, `update.py`
+- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), board registry (`BOARDS` dict, `ALL_BOARDS` flat list), `get_apps()` helper, `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility, platform helpers (`_host_platform()`, `_venv_bin()`, `_exe()`)
+- **`commands/`** — One module per command: `install.py`, `sdk.py`, `build.py`, `flash.py`, `create_app.py`, `update.py`
 - Entry point: `__main__.py` calls `cli.main()`
 
 ### Application Structure (Zephyr convention)

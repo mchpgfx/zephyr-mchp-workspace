@@ -14,12 +14,12 @@ from rich.progress import (
 )
 
 from ..config import (
-    WORKSPACE_ROOT, VENV_DIR, REQUIREMENTS,
+    WORKSPACE_ROOT, VENV_DIR, REQUIREMENTS, _venv_bin, _exe,
 )
 from .sdk import (
     SDK_DIR, TOOLCHAINS,
     detect_sdk_version, sdk_paths, _tc_extract_dir, _tc_dir,
-    _download, _extract_7z, _run_pip,
+    _tc_archive_name, _download, _extract, _run_pip,
     _register_sdk, _run_zephyr_export,
 )
 
@@ -187,13 +187,8 @@ def run(args: list[str], console: Console) -> None:
         step += 1
         console.print(f"  [cyan][{step}/{total_steps}][/] {msg}")
 
-    venv_python = os.path.join(VENV_DIR, "Scripts", "python.exe")
-    if not os.path.isfile(venv_python):
-        venv_python = os.path.join(VENV_DIR, "bin", "python")
-
-    venv_pip = os.path.join(VENV_DIR, "Scripts", "pip.exe")
-    if not os.path.isfile(venv_pip):
-        venv_pip = os.path.join(VENV_DIR, "bin", "pip")
+    venv_python = os.path.join(_venv_bin(), _exe("python"))
+    venv_pip = os.path.join(_venv_bin(), _exe("pip"))
 
     # -- 1. venv -----------------------------------------------------------
     next_step("Creating virtual environment...")
@@ -217,7 +212,7 @@ def run(args: list[str], console: Console) -> None:
     _run_pip(venv_pip, ["install", "cmake>=3.20"], "Installing cmake", console)
     cmake_path = shutil.which("cmake")
     if not cmake_path:
-        venv_cmake = os.path.join(VENV_DIR, "Scripts", "cmake.exe")
+        venv_cmake = os.path.join(_venv_bin(), _exe("cmake"))
         if os.path.isfile(venv_cmake):
             cmake_path = venv_cmake
     console.print(f"        [green]OK[/] cmake -> {cmake_path or 'installed'}")
@@ -269,14 +264,14 @@ def run(args: list[str], console: Console) -> None:
         if not os.path.isfile(minimal_path):
             url = f"{paths['base_url']}/{paths['minimal_archive']}"
             _download(url, minimal_path, "minimal SDK", console)
-        _extract_7z(minimal_path, SDK_DIR, "minimal SDK", console)
+        _extract(minimal_path, SDK_DIR, "minimal SDK", console)
         console.print("        [green]OK[/] Minimal SDK extracted")
 
     # -- 8+. Download + extract toolchains ---------------------------------
     extract_dir = _tc_extract_dir(paths["install_dir"])
     for tc_name in toolchains_to_install:
         tc = TOOLCHAINS[tc_name]
-        archive_file = tc["archive"]
+        archive_file = _tc_archive_name(tc, version)
         archive_path = os.path.join(downloads_dir, archive_file)
         tc_installed_dir = _tc_dir(paths["install_dir"], tc_name)
 
@@ -289,7 +284,7 @@ def run(args: list[str], console: Console) -> None:
             url = f"{paths['base_url']}/{archive_file}"
             _download(url, archive_path, tc["desc"], console)
 
-        _extract_7z(archive_path, extract_dir, tc_name, console)
+        _extract(archive_path, extract_dir, tc_name, console)
         console.print(f"        [green]OK[/] {tc_name} toolchain installed")
 
     # -- Register SDK + zephyr-export --------------------------------------

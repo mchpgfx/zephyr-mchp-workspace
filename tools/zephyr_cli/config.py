@@ -1,9 +1,52 @@
 """Shared configuration: paths, board list, helpers."""
 
 import os
+import platform
 import shutil
 import subprocess
 import sys
+
+
+# ── Platform detection ────────────────────────────────────────────
+
+def _host_platform() -> tuple[str, str]:
+    """Return (os_name, arch) for the current host.
+
+    os_name:  "windows", "linux", or "macos"
+    arch:     "x86_64" or "aarch64"
+    """
+    system = platform.system().lower()
+    if system == "darwin":
+        os_name = "macos"
+    elif system == "linux":
+        os_name = "linux"
+    else:
+        os_name = "windows"
+
+    machine = platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        arch = "aarch64"
+    else:
+        arch = "x86_64"
+
+    return os_name, arch
+
+
+def _venv_bin() -> str:
+    """Return the path to the venv executables directory."""
+    os_name, _ = _host_platform()
+    if os_name == "windows":
+        return os.path.join(WORKSPACE_ROOT, ".venv", "Scripts")
+    return os.path.join(WORKSPACE_ROOT, ".venv", "bin")
+
+
+def _exe(name: str) -> str:
+    """Return executable name with .exe suffix on Windows."""
+    os_name, _ = _host_platform()
+    if os_name == "windows":
+        return name + ".exe"
+    return name
+
 
 # ── Paths ─────────────────────────────────────────────────────────
 WORKSPACE_ROOT = os.path.dirname(
@@ -16,14 +59,14 @@ REQUIREMENTS = os.path.join(WORKSPACE_ROOT, "requirements.txt")
 
 # ── West executable (prefer venv, fall back to PATH) ─────────────
 def _find_west():
-    candidates = [
-        os.path.join(VENV_DIR, "Scripts", "west.exe"),   # Windows venv
-        os.path.join(VENV_DIR, "Scripts", "west"),        # Windows venv (no ext)
-        os.path.join(VENV_DIR, "bin", "west"),            # Unix venv
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
+    candidate = os.path.join(_venv_bin(), _exe("west"))
+    if os.path.isfile(candidate):
+        return candidate
+    # On Windows, west may not have .exe extension
+    if candidate.endswith(".exe"):
+        no_ext = candidate[:-4]
+        if os.path.isfile(no_ext):
+            return no_ext
     return shutil.which("west") or "west"
 
 WEST_EXE = _find_west()
@@ -93,10 +136,8 @@ def zephyr_env() -> dict:
     """Return an os.environ copy with venv, SDK, and ZEPHYR_BASE configured."""
     env = os.environ.copy()
 
-    # Venv Scripts on PATH
-    venv_scripts = os.path.join(VENV_DIR, "Scripts")
-    if not os.path.isdir(venv_scripts):
-        venv_scripts = os.path.join(VENV_DIR, "bin")
+    # Venv executables on PATH
+    venv_scripts = _venv_bin()
     if os.path.isdir(venv_scripts):
         env["PATH"] = venv_scripts + os.pathsep + env.get("PATH", "")
 

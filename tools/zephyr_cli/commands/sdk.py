@@ -15,7 +15,7 @@ from rich.progress import (
 
 import re as _re
 
-from ..config import WORKSPACE_ROOT, VENV_DIR
+from ..config import WORKSPACE_ROOT, VENV_DIR, _host_platform, _venv_bin, _exe
 
 # Fallback when Zephyr source hasn't been fetched yet
 _DEFAULT_SDK_VERSION = "0.16.9"
@@ -24,14 +24,41 @@ SDK_DIR = os.path.join(WORKSPACE_ROOT, ".sdk")
 
 TOOLCHAINS = {
     "arm": {
-        "archive": "toolchain_windows-x86_64_arm-zephyr-eabi.7z",
+        "target": "arm-zephyr-eabi",
         "desc": "ARM Cortex-M/R/A  (SAM, SAM0, MEC, PIC32 -- 26 boards)",
     },
     "riscv64": {
-        "archive": "toolchain_windows-x86_64_riscv64-zephyr-elf.7z",
+        "target": "riscv64-zephyr-elf",
         "desc": "RISC-V 64-bit  (mpfs_icicle, m2gl025_miv -- 2 boards)",
     },
 }
+
+
+def _archive_ext() -> str:
+    """Return the archive extension for the current platform."""
+    os_name, _ = _host_platform()
+    return ".7z" if os_name == "windows" else ".tar.xz"
+
+
+def _platform_string() -> str:
+    """Return the SDK platform string, e.g. 'windows-x86_64'."""
+    os_name, arch = _host_platform()
+    return f"{os_name}-{arch}"
+
+
+def _tc_archive_name(tc_info: dict, version: str) -> str:
+    """Compute the toolchain archive filename for the current platform.
+
+    SDK >= 1.0.0 uses 'toolchain_gnu_{platform}_{target}' naming.
+    SDK < 1.0.0  uses 'toolchain_{platform}_{target}' naming.
+    """
+    from packaging.version import Version
+    plat = _platform_string()
+    ext = _archive_ext()
+    target = tc_info["target"]
+    if Version(version) >= Version("1.0.0"):
+        return f"toolchain_gnu_{plat}_{target}{ext}"
+    return f"toolchain_{plat}_{target}{ext}"
 
 
 # ── SDK version detection ─────────────────────────────────────────
@@ -108,7 +135,9 @@ def sdk_paths(version: str) -> dict:
     """Compute SDK paths for a given version."""
     install_dir = os.path.join(SDK_DIR, f"zephyr-sdk-{version}")
     base_url = f"https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v{version}"
-    minimal_archive = f"zephyr-sdk-{version}_windows-x86_64_minimal.7z"
+    plat = _platform_string()
+    ext = _archive_ext()
+    minimal_archive = f"zephyr-sdk-{version}_{plat}_minimal{ext}"
     return {
         "version": version,
         "install_dir": install_dir,
@@ -133,16 +162,15 @@ def _tc_extract_dir(install_dir: str) -> str:
 def _tc_dir(install_dir: str, tc_name: str) -> str:
     """Return the expected directory for an installed toolchain."""
     base = _tc_extract_dir(install_dir)
-    if tc_name == "arm":
-        return os.path.join(base, "arm-zephyr-eabi")
-    return os.path.join(base, "riscv64-zephyr-elf")
+    target = TOOLCHAINS[tc_name]["target"]
+    return os.path.join(base, target)
 
 
 # Legacy module-level constants for backwards compatibility (cli.py etc.)
 SDK_VERSION = _DEFAULT_SDK_VERSION
 SDK_BASE_URL = f"https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v{SDK_VERSION}"
 SDK_INSTALL_DIR = os.path.join(SDK_DIR, f"zephyr-sdk-{SDK_VERSION}")
-MINIMAL_ARCHIVE = f"zephyr-sdk-{SDK_VERSION}_windows-x86_64_minimal.7z"
+MINIMAL_ARCHIVE = f"zephyr-sdk-{SDK_VERSION}_{_platform_string()}_minimal{_archive_ext()}"
 
 
 # ── Progress helpers ──────────────────────────────────────────────
@@ -224,6 +252,40 @@ def _extract_7z(archive: str, dest: str, label: str, console: Console) -> None:
             progress.update(task, completed=total_files, current_file="done")
 
 
+def _extract_tar_xz(archive: str, dest: str, label: str, console: Console) -> None:
+    """Extract a .tar.xz archive with a rich progress bar."""
+    import tarfile
+
+    with tarfile.open(archive, "r:xz") as tf:
+        members = tf.getmembers()
+        total_files = len(members)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[cyan]{task.description}"),
+        BarColumn(bar_width=30),
+        TaskProgressColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task(f"Extracting {label}", total=total_files)
+
+        with tarfile.open(archive, "r:xz") as tf:
+            for i, member in enumerate(tf.getmembers()):
+                tf.extract(member, path=dest, filter="data")
+                if i % 50 == 0:
+                    progress.update(task, completed=i)
+            progress.update(task, completed=total_files)
+
+
+def _extract(archive: str, dest: str, label: str, console: Console) -> None:
+    """Extract an archive, routing to the correct extractor by extension."""
+    if archive.endswith(".tar.xz"):
+        _extract_tar_xz(archive, dest, label, console)
+    else:
+        _extract_7z(archive, dest, label, console)
+
+
 def _run_pip(pip_exe: str, pip_args: list[str], label: str, console: Console) -> None:
     """Run a pip command with a spinner that shows live output."""
     with console.status(f"[cyan]{label}[/]", spinner="dots") as status:
@@ -274,13 +336,9 @@ def _register_sdk(console: Console, install_dir: str | None = None) -> None:
 
     # Find cmake — prefer venv, fall back to PATH
     cmake = None
-    for candidate in [
-        os.path.join(VENV_DIR, "Scripts", "cmake.exe"),
-        os.path.join(VENV_DIR, "bin", "cmake"),
-    ]:
-        if os.path.isfile(candidate):
-            cmake = candidate
-            break
+    candidate = os.path.join(_venv_bin(), _exe("cmake"))
+    if os.path.isfile(candidate):
+        cmake = candidate
     if not cmake:
         cmake = shutil.which("cmake")
     if not cmake:
@@ -407,13 +465,11 @@ def run(args: list[str], console: Console) -> None:
 
     # -- 1. Install CMake via pip ------------------------------------------
     next_step("Installing CMake (via pip)...")
-    venv_pip = os.path.join(VENV_DIR, "Scripts", "pip.exe")
-    if not os.path.isfile(venv_pip):
-        venv_pip = os.path.join(VENV_DIR, "bin", "pip")
+    venv_pip = os.path.join(_venv_bin(), _exe("pip"))
     _run_pip(venv_pip, ["install", "-q", "cmake>=3.20"], "Installing cmake", console)
     cmake_path = shutil.which("cmake")
     if not cmake_path:
-        venv_cmake = os.path.join(VENV_DIR, "Scripts", "cmake.exe")
+        venv_cmake = os.path.join(_venv_bin(), _exe("cmake"))
         if os.path.isfile(venv_cmake):
             cmake_path = venv_cmake
     console.print(f"        [green]OK[/] cmake -> {cmake_path or 'installed'}")
@@ -438,14 +494,14 @@ def run(args: list[str], console: Console) -> None:
         if not os.path.isfile(minimal_path):
             url = f"{paths['base_url']}/{paths['minimal_archive']}"
             _download(url, minimal_path, "minimal SDK", console)
-        _extract_7z(minimal_path, SDK_DIR, "minimal SDK", console)
+        _extract(minimal_path, SDK_DIR, "minimal SDK", console)
         console.print("        [green]OK[/] Minimal SDK extracted")
 
     # -- 3+. Download + extract toolchains ---------------------------------
     extract_dir = _tc_extract_dir(paths["install_dir"])
     for tc_name in toolchains_to_install:
         tc = TOOLCHAINS[tc_name]
-        archive_file = tc["archive"]
+        archive_file = _tc_archive_name(tc, version)
         archive_path = os.path.join(downloads_dir, archive_file)
         tc_installed_dir = _tc_dir(paths["install_dir"], tc_name)
 
@@ -458,7 +514,7 @@ def run(args: list[str], console: Console) -> None:
             url = f"{paths['base_url']}/{archive_file}"
             _download(url, archive_path, tc['desc'], console)
 
-        _extract_7z(archive_path, extract_dir, tc_name, console)
+        _extract(archive_path, extract_dir, tc_name, console)
         console.print(f"        [green]OK[/] {tc_name} toolchain installed")
 
     # -- Register SDK ------------------------------------------------------

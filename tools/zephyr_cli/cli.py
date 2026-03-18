@@ -18,6 +18,7 @@ from rich.table import Table
 from .config import (
     WORKSPACE_ROOT, WEST_EXE, ALL_BOARDS, BOARDS,
     get_apps, BUILD_DIR, VENV_DIR, zephyr_env,
+    _venv_bin, _exe,
 )
 from .commands import install, update, build, flash, create_app, sdk
 
@@ -255,7 +256,7 @@ def cmd_status(args, console):
     # CMake
     cmake_path = shutil.which("cmake")
     if not cmake_path:
-        venv_cmake = os.path.join(VENV_DIR, "Scripts", "cmake.exe")
+        venv_cmake = os.path.join(_venv_bin(), _exe("cmake"))
         if os.path.isfile(venv_cmake):
             cmake_path = venv_cmake
     if cmake_path:
