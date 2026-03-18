@@ -11,3 +11,6 @@ PyYAML>=6.0
 pykwalify
 jsonschema
 packaging
+
+# Flash/debug runner dependencies
+pylink-square>=2.0
