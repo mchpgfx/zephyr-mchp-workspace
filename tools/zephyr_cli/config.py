@@ -6,6 +6,13 @@ import shutil
 import subprocess
 import sys
 
+import re
+
+import yaml
+
+# Board/SOC/variant names must be safe identifiers (letters, digits, underscore, hyphen)
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-]*$")
+
 
 # ── Platform detection ────────────────────────────────────────────
 
@@ -71,56 +78,112 @@ def _find_west():
 
 WEST_EXE = _find_west()
 
-# ── Supported boards (Zephyr v4.x qualified targets: board/soc) ──
-BOARDS = {
-    "Atmel SAM": [
-        "sam4e_xpro/sam4e16e",
-        "sam4l_ek/sam4lc4c",
-        "sam4s_xplained/sam4s16c",
-        "sam_e70_xplained/same70q21",
-        "sam_e70_xplained/same70q21b",
-        "sam_v71_xult/samv71q21",
-        "sam_v71_xult/samv71q21b",
-    ],
-    "Atmel SAM0": [
-        "samc21n_xpro/samc21n18a",
-        "samd20_xpro/samd20j18",
-        "samd21_xpro/samd21j18a",
-        "same54_xpro/same54p20a",
-        "saml21_xpro/saml21j18b",
-        "samr21_xpro/samr21g18a",
-        "samr34_xpro/samr34j18b",
-    ],
-    "Microchip MEC": [
-        "mec1501modular_assy6885/mec1501_hsz",
-        "mec15xxevb_assy6853/mec1501_hsz",
-        "mec172xevb_assy6906/mec172x_nsz",
-        "mec172xmodular_assy6930/mec172x_nsz",
-        "mec_assy6941/mec1743_qlj",
-        "mec_assy6941/mec1743_qsz",
-        "mec_assy6941/mec1753_qlj",
-        "mec_assy6941/mec1753_qsz",
-    ],
-    "Microchip PIC32": [
-        "pic32cm_jh01_cnano/pic32cm5164jh01048",
-        "pic32cm_jh01_cpro/pic32cm5164jh01100",
-        "pic32cx_sg61_cult/pic32cx1025sg61128",
-        "pic32cz_ca80_cult/pic32cz8110ca80208",
-    ],
-    "Microchip SAM": [
-        "sam_e54_xpro/atsame54p20a",
-        "sama7d65_curiosity/sama7d65",
-        "sama7g54_ek/sama7g54",
-    ],
-    "Microchip Other": [
-        "mpfs_icicle/polarfire",
-        "mpfs_icicle/polarfire/smp",
-        "m2gl025_miv/miv",
-        "ev11l78a/samd20e16",
-    ],
-}
+# ── Dynamic board discovery (scans zephyr/boards at runtime) ─────
 
-ALL_BOARDS = [b for group in BOARDS.values() for b in group]
+_board_cache: dict[str, list[str]] | None = None
+
+
+def _discover_boards() -> dict[str, list[str]]:
+    """Scan zephyr/boards/{atmel,microchip}/**/board.yml and build a family→targets dict.
+
+    Returns {} if zephyr/ hasn't been fetched yet.
+    """
+    boards_root = os.path.join(WORKSPACE_ROOT, "zephyr", "boards")
+    if not os.path.isdir(boards_root):
+        return {}
+
+    result: dict[str, list[str]] = {}
+
+    for vendor in ("atmel", "microchip"):
+        vendor_dir = os.path.join(boards_root, vendor)
+        if not os.path.isdir(vendor_dir):
+            continue
+
+        vendor_cap = vendor.capitalize()
+
+        for dirpath, _dirnames, filenames in os.walk(vendor_dir):
+            if "board.yml" not in filenames:
+                continue
+
+            # Determine family from directory depth relative to vendor dir
+            rel = os.path.relpath(dirpath, vendor_dir).replace("\\", "/")
+            parts = rel.split("/")
+
+            if len(parts) == 2:
+                # e.g. sam/sam_e70_xplained → family_dir = "sam"
+                family_dir = parts[0]
+                family = f"{vendor_cap} {family_dir.upper()}"
+            elif len(parts) == 1:
+                # Board directly under vendor dir (microchip only)
+                family_dir = None
+                board_dir_name = parts[0]
+                if board_dir_name.startswith("mec"):
+                    family = "Microchip MEC"
+                else:
+                    family = "Microchip Other"
+            else:
+                continue  # unexpected nesting
+
+            # Parse board.yml
+            board_yml = os.path.join(dirpath, "board.yml")
+            try:
+                with open(board_yml) as f:
+                    data = yaml.safe_load(f)
+            except (OSError, yaml.YAMLError):
+                continue
+
+            if not data or "board" not in data:
+                continue
+
+            board_info = data["board"]
+            if not isinstance(board_info, dict):
+                continue
+            board_name = board_info.get("name", "")
+            if not board_name or not _SAFE_NAME_RE.match(board_name):
+                continue
+
+            targets = []
+            for soc in board_info.get("socs", []):
+                if not isinstance(soc, dict):
+                    continue
+                soc_name = soc.get("name", "")
+                if not soc_name or not _SAFE_NAME_RE.match(soc_name):
+                    continue
+                targets.append(f"{board_name}/{soc_name}")
+                for variant in soc.get("variants", []):
+                    if not isinstance(variant, dict):
+                        continue
+                    variant_name = variant.get("name", "")
+                    if variant_name and _SAFE_NAME_RE.match(variant_name):
+                        targets.append(f"{board_name}/{soc_name}/{variant_name}")
+
+            if targets:
+                result.setdefault(family, []).extend(targets)
+
+    # Sort targets within each family for consistent output
+    for family in result:
+        result[family].sort()
+
+    return dict(sorted(result.items()))
+
+
+def get_boards() -> dict[str, list[str]]:
+    """Return family→targets dict (cached per session)."""
+    global _board_cache
+    if _board_cache is None:
+        _board_cache = _discover_boards()
+    return _board_cache
+
+
+def get_all_boards() -> list[str]:
+    """Return flat list of all board targets (cached per session)."""
+    return [b for group in get_boards().values() for b in group]
+
+
+def invalidate_board_cache() -> None:
+    """Clear the board cache so the next call re-scans zephyr/boards."""
+    global _board_cache
+    _board_cache = None
 
 # ── Helpers ───────────────────────────────────────────────────────
 def get_apps():

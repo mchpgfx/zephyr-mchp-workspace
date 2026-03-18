@@ -246,6 +246,10 @@ def run(args: list[str], console: Console) -> None:
     _run_west_update(west, console)
     _attach_zephyr_branch(zephyr_ref, console)
 
+    # Board list may have changed — clear the cache so it re-scans
+    from ..config import invalidate_board_cache
+    invalidate_board_cache()
+
     # -- 7. Auto-detect + download SDK ------------------------------------
     version = detect_sdk_version(console)
     paths = sdk_paths(version)

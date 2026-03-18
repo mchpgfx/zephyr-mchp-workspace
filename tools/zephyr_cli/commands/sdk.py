@@ -25,11 +25,11 @@ SDK_DIR = os.path.join(WORKSPACE_ROOT, ".sdk")
 TOOLCHAINS = {
     "arm": {
         "target": "arm-zephyr-eabi",
-        "desc": "ARM Cortex-M/R/A  (SAM, SAM0, MEC, PIC32 -- 26 boards)",
+        "desc": "ARM Cortex-M/R/A",
     },
     "riscv64": {
         "target": "riscv64-zephyr-elf",
-        "desc": "RISC-V 64-bit  (mpfs_icicle, m2gl025_miv -- 2 boards)",
+        "desc": "RISC-V 64-bit",
     },
 }
 
@@ -402,8 +402,8 @@ def _usage(console: Console) -> None:
     console.print("  SDK version is auto-detected from the Zephyr source.")
     console.print()
     console.print("  Options:")
-    console.print("    [bold](default)[/]  ARM toolchain only  (26 Cortex-M/R/A boards)")
-    console.print("    [bold]--riscv[/]    Also install RISC-V  (mpfs_icicle, m2gl025_miv)")
+    console.print("    [bold](default)[/]  ARM toolchain only")
+    console.print("    [bold]--riscv[/]    Also install RISC-V toolchain")
     console.print("    [bold]--all[/]      Install all toolchains")
     console.print("    [bold]--status[/]   Show current SDK status")
 

@@ -18,6 +18,10 @@ def run(args: list[str], console: Console) -> None:
     ref, _ = _read_current_manifest()
     _attach_zephyr_branch(ref, console)
 
+    # Board list may have changed — clear the cache so it re-scans
+    from ..config import invalidate_board_cache
+    invalidate_board_cache()
+
     console.print("  [cyan]*[/] Re-registering CMake packages...")
     _register_sdk(console)
     _run_zephyr_export(console)

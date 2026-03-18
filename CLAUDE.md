@@ -79,7 +79,7 @@ When using a fork with a branch revision (not a tag or SHA), `zephyr/` is checke
 ### CLI Module Structure (`tools/zephyr_cli/`)
 
 - **`cli.py`** — Main REPL loop, command dispatch, autocomplete (`ZephyrCompleter`)
-- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), board registry (`BOARDS` dict, `ALL_BOARDS` flat list), `get_apps()` helper, `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility, platform helpers (`_host_platform()`, `_venv_bin()`, `_exe()`)
+- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), dynamic board discovery (`get_boards()`, `get_all_boards()` — scans `zephyr/boards/` at runtime), `get_apps()` helper, `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility, platform helpers (`_host_platform()`, `_venv_bin()`, `_exe()`)
 - **`commands/`** — One module per command: `install.py`, `sdk.py`, `build.py`, `flash.py`, `create_app.py`, `update.py`
 - Entry point: `__main__.py` calls `cli.main()`
 
@@ -102,19 +102,23 @@ Build system is CMake 3.20+ using Zephyr's CMake package. Board-specific configu
 
 ## Board Families
 
-Six families are supported (33 board targets), defined in `tools/zephyr_cli/config.py`.
-Board targets use Zephyr v4.x qualified format: `board_name/soc_qualifier`.
+Boards are **discovered dynamically** at runtime by scanning `zephyr/boards/{atmel,microchip}/**/board.yml`. No hardcoded board list — the CLI always reflects the boards available in the fetched Zephyr source.
 
-- **Atmel SAM** (Cortex-M): sam4e_xpro, sam_e70_xplained, sam_v71_xult, etc.
-- **Atmel SAM0** (Cortex-M0+): samd20/21_xpro, same54_xpro, samr21/34_xpro, etc.
-- **Microchip MEC** (Cortex-M): mec15xx/172x evaluation boards
-- **Microchip PIC32** (Cortex-M): pic32cm/cx/cz boards
-- **Microchip SAM** (Cortex-A): sam_e54_xpro, sama7d65_curiosity, sama7g54_ek
-- **Microchip Other**: mpfs_icicle (RISC-V), m2gl025_miv (RISC-V), ev11l78a
+Board targets use Zephyr v4.x qualified format: `board_name/soc_qualifier[/variant]`.
+
+Family is derived from directory structure:
+- `atmel/sam/` → **Atmel SAM** (Cortex-M)
+- `atmel/sam0/` → **Atmel SAM0** (Cortex-M0+)
+- `microchip/sam/` → **Microchip SAM** (Cortex-A)
+- `microchip/pic32c/` → **Microchip PIC32C** (Cortex-M)
+- `microchip/mec*/` → **Microchip MEC** (Cortex-M)
+- `microchip/` (other) → **Microchip Other** (RISC-V, etc.)
+
+The board cache is computed once per session and invalidated after `/install` or `/update`.
 
 ## Adding a New Board
 
-Add the board name to the appropriate family in `BOARDS` dict in `tools/zephyr_cli/config.py`. The board definition itself must exist in Zephyr or in a custom board directory.
+Add a `board.yml` to the appropriate directory under `zephyr/boards/`. The CLI will discover it automatically on next session (or after `/update`). No changes to CLI code are needed.
 
 ## Adding a New CLI Command
 

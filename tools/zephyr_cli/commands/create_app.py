@@ -37,6 +37,10 @@ def run(args: list[str], console: Console) -> None:
         return
 
     name = args[0].strip().replace(" ", "_").lower()
+    if "/" in name or "\\" in name or ".." in name:
+        console.print(f"  [red]X Invalid app name:[/] {args[0]}")
+        return
+
     app_path = os.path.join(APP_DIR, name)
 
     if os.path.exists(app_path):

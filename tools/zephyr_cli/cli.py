@@ -16,7 +16,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .config import (
-    WORKSPACE_ROOT, WEST_EXE, ALL_BOARDS, BOARDS,
+    WORKSPACE_ROOT, WEST_EXE, get_all_boards, get_boards,
     get_apps, BUILD_DIR, VENV_DIR, zephyr_env,
     _venv_bin, _exe,
 )
@@ -76,10 +76,10 @@ class ZephyrCompleter(Completer):
                 yield Completion("-b", display_meta="board flag")
             # position 3: board name
             elif n == 3 and words[2] == "-b" and text.endswith(" "):
-                for b in ALL_BOARDS:
+                for b in get_all_boards():
                     yield Completion(b)
             elif n == 4 and words[2] == "-b" and not text.endswith(" "):
-                for b in ALL_BOARDS:
+                for b in get_all_boards():
                     if b.startswith(words[3]):
                         yield Completion(b, start_position=-len(words[3]))
 
@@ -141,11 +141,15 @@ class ZephyrCompleter(Completer):
 # ── Built-in commands ─────────────────────────────────────────────
 
 def cmd_boards(args, console):
+    boards = get_boards()
+    if not boards:
+        console.print("  [yellow]No boards found.[/] Run [bold]/install[/] to fetch Zephyr source.")
+        return
     table = Table(title="Supported Boards", show_lines=False, pad_edge=False)
     table.add_column("Family", style="cyan", no_wrap=True)
     table.add_column("Boards")
-    for family, boards in BOARDS.items():
-        table.add_row(family, ", ".join(boards))
+    for family, targets in boards.items():
+        table.add_row(family, ", ".join(targets))
     console.print(table)
 
 
@@ -160,7 +164,10 @@ def cmd_apps(args, console):
 
 def cmd_clean(args, console):
     if args:
-        target = os.path.join(BUILD_DIR, args[0])
+        target = os.path.realpath(os.path.join(BUILD_DIR, args[0]))
+        if not target.startswith(os.path.realpath(BUILD_DIR) + os.sep):
+            console.print(f"  [red]X Invalid path:[/] {args[0]}")
+            return
         if os.path.isdir(target):
             shutil.rmtree(target)
             console.print(f"  [green]OK[/] Removed build/{args[0]}")

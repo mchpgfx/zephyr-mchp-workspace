@@ -6,7 +6,7 @@ import time
 
 from rich.console import Console
 
-from ..config import WORKSPACE_ROOT, APP_DIR, BUILD_DIR, WEST_EXE, ALL_BOARDS, get_apps, zephyr_env
+from ..config import WORKSPACE_ROOT, APP_DIR, BUILD_DIR, WEST_EXE, get_apps, zephyr_env
 
 
 def _usage(console: Console) -> None:

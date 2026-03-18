@@ -81,18 +81,12 @@ zephyr > cmake --version
 
 The SDK version is auto-detected from the Zephyr source — no manual version management needed.
 
-## Supported Boards (33 targets)
+## Supported Boards
 
-Board targets use Zephyr v4.x qualified format: `board/soc`. Run `/boards` for the full list.
+Boards are discovered dynamically from `zephyr/boards/{atmel,microchip}/**/board.yml`.
+Board targets use Zephyr v4.x qualified format: `board/soc[/variant]`. Run `/boards` for the full list.
 
-| Family | Targets |
-|--------|---------|
-| Atmel SAM | sam4e_xpro/sam4e16e, sam4l_ek/sam4lc4c, sam4s_xplained/sam4s16c, sam_e70_xplained/same70q21[b], sam_v71_xult/samv71q21[b] |
-| Atmel SAM0 | samc21n_xpro, samd20_xpro, samd21_xpro, same54_xpro, saml21_xpro, samr21_xpro, samr34_xpro |
-| Microchip MEC | mec1501modular_assy6885, mec15xxevb_assy6853, mec172xevb_assy6906, mec172xmodular_assy6930, mec_assy6941/{4 SoCs} |
-| Microchip PIC32 | pic32cm_jh01_cnano, pic32cm_jh01_cpro, pic32cx_sg61_cult, pic32cz_ca80_cult |
-| Microchip SAM | sam_e54_xpro/atsame54p20a, sama7d65_curiosity/sama7d65, sama7g54_ek/sama7g54 |
-| Microchip Other | mpfs_icicle/polarfire[/smp] (RISC-V), m2gl025_miv/miv (RISC-V), ev11l78a/samd20e16 |
+Families: Atmel SAM, Atmel SAM0, Microchip MEC, Microchip PIC32C, Microchip SAM, Microchip Other (RISC-V).
 
 ## Project Layout
 
