@@ -80,6 +80,7 @@ When using a fork with a branch revision (not a tag or SHA), `zephyr/` is checke
 
 - **`cli.py`** — Main REPL loop, command dispatch, autocomplete (`ZephyrCompleter`)
 - **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), dynamic board discovery (`get_boards()`, `get_all_boards()` — scans `zephyr/boards/` at runtime), `get_apps()` helper, `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility, platform helpers (`_host_platform()`, `_venv_bin()`, `_exe()`)
+- **`live_output.py`** — Collapsible Rich Live subprocess output panel. `run_live()` runs a command with a bordered panel showing the last N lines (Ctrl+O toggles expand/collapse). `print_error_context()` extracts and displays lines around error matches on failure.
 - **`commands/`** — One module per command: `install.py`, `sdk.py`, `build.py`, `flash.py`, `create_app.py`, `update.py`
 - Entry point: `__main__.py` calls `cli.main()`
 
@@ -129,3 +130,8 @@ Add a `board.yml` to the appropriate directory under `zephyr/boards/`. The CLI w
 ## Git
 
 Never include "Co-Authored-By" lines in commit messages.
+
+### Do Not Commit
+
+- **`manifest/west.yml`** — Modified per-user for fork/branch selection. Never stage or commit changes to this file.
+- **`app/`** — Applications are separate repos or user-specific. Never stage or commit new apps to this workspace repo.

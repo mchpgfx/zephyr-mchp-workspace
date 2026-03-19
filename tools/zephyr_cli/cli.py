@@ -21,6 +21,7 @@ from .config import (
     _venv_bin, _exe,
 )
 from .commands import install, update, build, flash, create_app, sdk
+from .live_output import run_live
 
 
 # ── Autocomplete ──────────────────────────────────────────────────
@@ -351,21 +352,16 @@ def _run_shell(text: str, console: Console) -> None:
     """Execute an arbitrary command with the Zephyr environment."""
     env = zephyr_env()
     try:
-        proc = subprocess.Popen(
+        rc, elapsed, lines = run_live(
             text,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+            text,
+            console,
             cwd=WORKSPACE_ROOT,
             env=env,
+            shell=True,
         )
-        for line in proc.stdout:
-            console.print(f"  [dim]{line.rstrip()}[/]")
-        proc.wait()
-        if proc.returncode != 0:
-            console.print(f"  [yellow]Exit code {proc.returncode}[/]")
+        if rc != 0:
+            console.print(f"  [yellow]Exit code {rc}[/]")
     except Exception as exc:
         console.print(f"  [red]Error: {exc}[/]")
 

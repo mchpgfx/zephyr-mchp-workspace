@@ -1,12 +1,11 @@
 """  /flash <app> [extra west-flash args]  — flash firmware to a board."""
 
 import os
-import subprocess
-import time
 
 from rich.console import Console
 
 from ..config import WORKSPACE_ROOT, BUILD_DIR, WEST_EXE, get_apps, zephyr_env
+from ..live_output import run_live, print_error_context
 
 
 def _usage(console: Console) -> None:
@@ -39,24 +38,18 @@ def run(args: list[str], console: Console) -> None:
     cmd = [WEST_EXE, "flash", "-d", build_out] + extra
     env = zephyr_env()
 
-    t0 = time.time()
-    proc = subprocess.Popen(
+    rc, elapsed, lines = run_live(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
+        f"Flashing {app_name}",
+        console,
         cwd=WORKSPACE_ROOT,
         env=env,
     )
-    for line in proc.stdout:
-        console.print(f"  [dim]{line.rstrip()}[/]")
-    proc.wait()
-    elapsed = time.time() - t0
 
-    if proc.returncode == 0:
-        console.print(f"\n  [bold green]OK Flash succeeded[/] ({elapsed:.1f}s)")
+    if rc == 0:
+        console.print(f"  [bold green]OK Flash succeeded[/] ({elapsed:.1f}s)")
     else:
         console.print(
-            f"\n  [bold red]X Flash failed[/] (exit {proc.returncode}, {elapsed:.1f}s)"
+            f"  [bold red]X Flash failed[/] (exit {rc}, {elapsed:.1f}s)"
         )
+        print_error_context(lines, console)
