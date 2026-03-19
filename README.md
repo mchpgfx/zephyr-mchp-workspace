@@ -71,6 +71,8 @@ Launch the REPL for autocomplete and command history:
 | `/update` | Update Zephyr and modules |
 | `/clean [app]` | Remove build artifacts |
 
+Build and flash output is displayed in a collapsible live panel — press **Ctrl+O** to toggle between a compact tail view and the full log. On failure, relevant error context lines are extracted and printed automatically.
+
 Commands without `/` are passed directly to the shell with the Zephyr environment (`ZEPHYR_BASE`, `ZEPHYR_SDK_INSTALL_DIR`, venv `PATH`) fully configured:
 
 ```

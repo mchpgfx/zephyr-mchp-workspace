@@ -1,12 +1,11 @@
 """  /build <app> -b <board> [extra west-build args]  — build firmware."""
 
 import os
-import subprocess
-import time
 
 from rich.console import Console
 
 from ..config import WORKSPACE_ROOT, APP_DIR, BUILD_DIR, WEST_EXE, get_apps, zephyr_env
+from ..live_output import run_live, print_error_context
 
 
 def _usage(console: Console) -> None:
@@ -59,23 +58,16 @@ def run(args: list[str], console: Console) -> None:
 
     env = zephyr_env()
 
-    t0 = time.time()
-    proc = subprocess.Popen(
+    rc, elapsed, lines = run_live(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
+        f"Building {app_name} for {board}",
+        console,
         cwd=WORKSPACE_ROOT,
         env=env,
     )
-    for line in proc.stdout:
-        console.print(f"  [dim]{line.rstrip()}[/]")
-    proc.wait()
-    elapsed = time.time() - t0
 
-    if proc.returncode == 0:
-        console.print(f"\n  [bold green]OK Build succeeded[/] ({elapsed:.1f}s)")
+    if rc == 0:
+        console.print(f"  [bold green]OK Build succeeded[/] ({elapsed:.1f}s)")
         zephyr_out = os.path.join(build_out, "zephyr")
         for ext in ("zephyr.elf", "zephyr.bin", "zephyr.hex"):
             path = os.path.join(zephyr_out, ext)
@@ -83,5 +75,6 @@ def run(args: list[str], console: Console) -> None:
                 console.print(f"    {os.path.relpath(path, WORKSPACE_ROOT)}")
     else:
         console.print(
-            f"\n  [bold red]X Build failed[/] (exit {proc.returncode}, {elapsed:.1f}s)"
+            f"  [bold red]X Build failed[/] (exit {rc}, {elapsed:.1f}s)"
         )
+        print_error_context(lines, console)
