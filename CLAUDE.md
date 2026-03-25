@@ -163,3 +163,27 @@ Never include "Co-Authored-By" lines in commit messages.
 
 - **`manifest/west.yml`** — Modified per-user for fork/branch selection. Never stage or commit changes to this file.
 - **`app/`** — Applications are separate repos or user-specific. Never stage or commit new apps to this workspace repo.
+
+### Release Process
+
+Development happens on the `dev` branch. Releases are published to `master` as squashed orphan-style commits — each release is a single commit containing the full tree, so `master` has one commit per release.
+
+**CLAUDE.md must not be included in release commits on `master`.** It lives only on `dev`.
+
+1. Commit all changes on `dev`.
+2. Create a new commit on `master` by squashing the entire `dev` tree onto the previous `master` tip. Exclude `CLAUDE.md` by building a tree without it:
+   ```bash
+   # Remove CLAUDE.md from dev's tree to build the release tree
+   git read-tree dev
+   git rm --cached CLAUDE.md
+   TREE=$(git write-tree)
+   git read-tree HEAD  # restore index
+   COMMIT=$(git commit-tree "$TREE" -p master -m "Zephyr RTOS workspace CLI vX.Y.Z")
+   git update-ref refs/heads/master "$COMMIT"
+   ```
+3. Tag the new `master` commit: `git tag -a vX.Y.Z master -m "Zephyr RTOS workspace CLI vX.Y.Z"`
+4. Force-push: `git push origin master --force --tags && git push origin dev`
+
+To **re-release** (replace an existing release commit on `master`):
+1. Delete the old tag: `git tag -d vX.Y.Z`
+2. Re-create the commit parented on the **previous** release instead of current `master` tip, then re-tag and force-push.
