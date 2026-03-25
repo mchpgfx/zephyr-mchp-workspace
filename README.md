@@ -71,16 +71,7 @@ Launch the REPL for autocomplete and command history:
 | `/update` | Update Zephyr and modules |
 | `/clean [app]` | Remove build artifacts |
 
-Build and flash output is displayed in a collapsible live panel:
-
-| Key | Action |
-|-----|--------|
-| **Ctrl+O** | Toggle between compact tail view and expanded scrollable view |
-| **↑ / ↓** | Scroll line-by-line (expanded mode) |
-| **PgUp / PgDn** | Scroll by page (expanded mode) |
-| **Home / End** | Jump to top / bottom of output (expanded mode) |
-
-On failure, relevant error context lines are extracted and printed automatically.
+Build and flash output is displayed in a live panel.
 
 Commands without `/` are passed directly to the shell with the Zephyr environment (`ZEPHYR_BASE`, `ZEPHYR_SDK_INSTALL_DIR`, venv `PATH`) fully configured:
 

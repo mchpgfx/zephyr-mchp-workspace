@@ -17,7 +17,7 @@ from rich.table import Table
 
 from .config import (
     WORKSPACE_ROOT, WEST_EXE, get_all_boards, get_boards,
-    get_apps, BUILD_DIR, VENV_DIR, zephyr_env,
+    get_apps, get_app_board_hint, BUILD_DIR, VENV_DIR, zephyr_env,
     _venv_bin, _exe,
 )
 from .commands import install, update, build, flash, create_app, sdk, apps
@@ -42,6 +42,41 @@ COMMANDS = {
 }
 
 
+def _app_completions(prefix: str, with_board: bool = False):
+    """Yield app completions. Pack apps show app name with pack as meta.
+
+    When *with_board* is True, apps whose CMakeLists.txt has a
+    ``# board: <target>`` first-line comment get `` -b <target>``
+    appended to the inserted text automatically.
+    """
+    for a in get_apps():
+        if not a.startswith(prefix):
+            continue
+
+        text = a
+        meta = None
+        if with_board:
+            board = get_app_board_hint(a)
+            if board:
+                text = f"{a} -b {board}"
+                meta = board
+
+        if "/" in a:
+            pack, app_name = a.split("/", 1)
+            yield Completion(
+                text,
+                start_position=-len(prefix),
+                display=app_name,
+                display_meta=meta or pack,
+            )
+        else:
+            yield Completion(
+                text,
+                start_position=-len(prefix),
+                display_meta=meta,
+            )
+
+
 class ZephyrCompleter(Completer):
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -64,14 +99,11 @@ class ZephyrCompleter(Completer):
 
         # /build completions
         if cmd == "/build":
-            # position 1: app name
+            # position 1: app name (with board hint if available)
             if n == 1 and text.endswith(" "):
-                for a in get_apps():
-                    yield Completion(a)
+                yield from _app_completions("", with_board=True)
             elif n == 2 and not text.endswith(" "):
-                for a in get_apps():
-                    if a.startswith(words[1]):
-                        yield Completion(a, start_position=-len(words[1]))
+                yield from _app_completions(words[1], with_board=True)
             # position 2: -b flag
             elif n == 2 and text.endswith(" "):
                 yield Completion("-b", display_meta="board flag")
@@ -116,12 +148,9 @@ class ZephyrCompleter(Completer):
         # /flash completions
         elif cmd == "/flash":
             if n == 1 and text.endswith(" "):
-                for a in get_apps():
-                    yield Completion(a)
+                yield from _app_completions("")
             elif n == 2 and not text.endswith(" "):
-                for a in get_apps():
-                    if a.startswith(words[1]):
-                        yield Completion(a, start_position=-len(words[1]))
+                yield from _app_completions(words[1])
             elif text.endswith(" "):
                 for o in ["--runner"]:
                     yield Completion(o)
@@ -142,12 +171,9 @@ class ZephyrCompleter(Completer):
         # /clean completions
         elif cmd == "/clean":
             if n == 1 and text.endswith(" "):
-                for a in get_apps():
-                    yield Completion(a)
+                yield from _app_completions("")
             elif n == 2 and not text.endswith(" "):
-                for a in get_apps():
-                    if a.startswith(words[1]):
-                        yield Completion(a, start_position=-len(words[1]))
+                yield from _app_completions(words[1])
 
 
 # ── Built-in commands ─────────────────────────────────────────────

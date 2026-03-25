@@ -85,11 +85,30 @@ def _detect_min_sdk_version() -> str | None:
     return None
 
 
-def _find_best_sdk_release(min_version: str, console: Console) -> str:
-    """Query GitHub for the latest SDK release compatible with min_version.
+def _sdk_artifact_exists(version: str) -> bool:
+    """Check if the minimal SDK archive actually exists for this version."""
+    import urllib.request
+    import urllib.error
 
-    Finds the newest vX.Y.Z tag where major version matches and
-    the full version is >= min_version.
+    plat = _platform_string()
+    ext = _archive_ext()
+    url = (
+        f"https://github.com/zephyrproject-rtos/sdk-ng/releases/download/"
+        f"v{version}/zephyr-sdk-{version}_{plat}_minimal{ext}"
+    )
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=10):
+            return True
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError):
+        return False
+
+
+def _find_best_sdk_release(min_version: str, console: Console) -> str:
+    """Query GitHub for the latest downloadable SDK release >= min_version.
+
+    Tries candidates from newest to oldest, verifying download artifacts
+    exist. Fails only if no candidate >= min_version has artifacts.
     """
     from packaging.version import Version
 
@@ -110,8 +129,10 @@ def _find_best_sdk_release(min_version: str, console: Console) -> str:
         m = pattern.search(line)
         if m:
             ver = Version(m.group(1))
-            # Same major version and >= minimum
-            if ver.major == min_ver.major and ver >= min_ver:
+            if ver < min_ver:
+                continue
+            # SDK >= 1.0 is forward-compatible; older series must stay on same major
+            if min_ver >= Version("1.0") or ver.major == min_ver.major:
                 candidates.append(m.group(1))
 
     if not candidates:
@@ -119,8 +140,16 @@ def _find_best_sdk_release(min_version: str, console: Console) -> str:
             f"No SDK release found compatible with Zephyr requirement >={min_version}"
         )
 
-    candidates.sort(key=Version)
-    return candidates[-1]
+    # Try newest first, fall back to older versions
+    candidates.sort(key=Version, reverse=True)
+    for ver_str in candidates:
+        if _sdk_artifact_exists(ver_str):
+            return ver_str
+        console.print(f"        [dim]v{ver_str} has no artifacts, trying older...[/]")
+
+    raise RuntimeError(
+        f"No downloadable SDK release found >= {min_version}"
+    )
 
 
 def detect_sdk_version(console: Console) -> str:

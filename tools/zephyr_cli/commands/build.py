@@ -66,7 +66,9 @@ def run(args: list[str], console: Console) -> None:
         env=env,
     )
 
-    if rc == 0:
+    if rc is None:
+        console.print(f"  [yellow]X Build interrupted[/]")
+    elif rc == 0:
         console.print(f"  [bold green]OK Build succeeded[/] ({elapsed:.1f}s)")
         zephyr_out = os.path.join(build_out, "zephyr")
         for ext in ("zephyr.elf", "zephyr.bin", "zephyr.hex"):

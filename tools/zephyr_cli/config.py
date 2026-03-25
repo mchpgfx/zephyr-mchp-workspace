@@ -213,6 +213,23 @@ def get_apps():
     return sorted(apps)
 
 
+def get_app_board_hint(app: str) -> str | None:
+    """Read a board hint from the first line of an app's CMakeLists.txt.
+
+    Looks for ``# board: <board_target>`` on line 1.
+    Returns the board string or None.
+    """
+    cmake = os.path.join(APP_DIR, app, "CMakeLists.txt")
+    try:
+        with open(cmake) as f:
+            first = f.readline().strip()
+    except OSError:
+        return None
+    if first.startswith("# board:"):
+        return first.split(":", 1)[1].strip() or None
+    return None
+
+
 def get_app_required_modules() -> tuple[list[str], dict[str, list[str]]]:
     """Scan west-requires.yml files for additional west module dependencies.
 
