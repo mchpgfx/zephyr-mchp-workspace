@@ -195,6 +195,29 @@ def get_apps():
         if os.path.isdir(os.path.join(APP_DIR, d))
     )
 
+
+def get_app_required_modules() -> tuple[list[str], dict[str, list[str]]]:
+    """Scan app/*/west-requires.yml for additional west module dependencies.
+
+    Returns (sorted_modules, {module_name: [app_names_that_need_it]}).
+    """
+    module_to_apps: dict[str, list[str]] = {}
+    for app in get_apps():
+        req_file = os.path.join(APP_DIR, app, "west-requires.yml")
+        if not os.path.isfile(req_file):
+            continue
+        try:
+            with open(req_file) as f:
+                data = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for mod in data.get("modules", []):
+            if isinstance(mod, str) and mod.strip():
+                module_to_apps.setdefault(mod.strip(), []).append(app)
+    return sorted(module_to_apps), module_to_apps
+
 def zephyr_env() -> dict:
     """Return an os.environ copy with venv, SDK, and ZEPHYR_BASE configured."""
     env = os.environ.copy()

@@ -1,7 +1,9 @@
 """Collapsible live output panel for subprocess commands.
 
 Shows the last N lines of output in a bordered panel during execution.
-Press Ctrl+O to toggle between collapsed (tail) and expanded (full) views.
+Press Ctrl+O to toggle between collapsed (tail) and expanded (scrollable) views.
+In expanded mode: arrow keys scroll line-by-line, PgUp/PgDn by page, Home/End
+jump to top/bottom.
 """
 
 import re
@@ -89,9 +91,15 @@ class LiveOutput:
         self.tail = tail
         self._lines: list[str] = []
         self._expanded = False
+        self._scroll_offset = 0  # lines from bottom (0 = at bottom)
         self._lock = threading.Lock()
         self._running = True
         self._rc: int | None = None
+
+    @property
+    def _view_height(self) -> int:
+        """Max content lines visible in expanded mode."""
+        return max(10, self.console.height - 6)
 
     @property
     def line_count(self) -> int:
@@ -101,10 +109,47 @@ class LiveOutput:
     def add_line(self, line: str) -> None:
         with self._lock:
             self._lines.append(_strip_ansi(line))
+            # Keep view stable when scrolled up
+            if self._scroll_offset > 0:
+                self._scroll_offset += 1
 
     def toggle(self) -> None:
         with self._lock:
             self._expanded = not self._expanded
+            self._scroll_offset = 0  # reset scroll on toggle
+
+    def scroll_up(self, n: int = 1) -> None:
+        with self._lock:
+            if not self._expanded:
+                return
+            max_offset = max(0, len(self._lines) - self._view_height)
+            self._scroll_offset = min(self._scroll_offset + n, max_offset)
+
+    def scroll_down(self, n: int = 1) -> None:
+        with self._lock:
+            if not self._expanded:
+                return
+            self._scroll_offset = max(0, self._scroll_offset - n)
+
+    def page_up(self) -> None:
+        self.scroll_up(max(1, self._view_height - 2))
+
+    def page_down(self) -> None:
+        self.scroll_down(max(1, self._view_height - 2))
+
+    def scroll_home(self) -> None:
+        with self._lock:
+            if not self._expanded:
+                return
+            self._scroll_offset = max(
+                0, len(self._lines) - self._view_height
+            )
+
+    def scroll_end(self) -> None:
+        with self._lock:
+            if not self._expanded:
+                return
+            self._scroll_offset = 0
 
     def finish(self, return_code: int) -> None:
         with self._lock:
@@ -119,33 +164,61 @@ class LiveOutput:
         with self._lock:
             lines = list(self._lines)
             expanded = self._expanded
+            scroll_offset = self._scroll_offset
             running = self._running
             rc = self._rc
 
         total = len(lines)
 
-        if expanded or total <= self.tail:
-            visible = lines
-            hidden = 0
+        if not expanded:
+            # Collapsed: show tail
+            if total <= self.tail:
+                visible = lines
+            else:
+                visible = lines[-self.tail :]
+            hidden = max(0, total - self.tail)
+            above = 0
+            below = 0
         else:
-            visible = lines[-self.tail:]
-            hidden = total - self.tail
+            # Expanded: windowed view with scroll support
+            view_h = self._view_height
+            hidden = 0
+            if total <= view_h:
+                visible = lines
+                above = 0
+                below = 0
+            else:
+                max_offset = max(0, total - view_h)
+                scroll_offset = min(scroll_offset, max_offset)
+                end_idx = total - scroll_offset
+                start_idx = max(0, end_idx - view_h)
+                visible = lines[start_idx:end_idx]
+                above = start_idx
+                below = total - end_idx
 
         # no_wrap + ellipsis stops long lines from wrapping (prevents
         # the panel height from jumping).
-        content = Text(no_wrap=True, overflow="ellipsis")
-        if visible:
+        if not visible and not above and not below:
+            content = Text("Waiting for output...", style="dim")
+        else:
+            content = Text(no_wrap=True, overflow="ellipsis")
+            if above > 0:
+                content.append(
+                    f"  ▲ {above} more lines above\n", style="dim italic"
+                )
             for i, line in enumerate(visible):
                 content.append(line)
                 if i < len(visible) - 1:
                     content.append("\n")
-        else:
-            content = Text("Waiting for output...", style="dim")
+            if below > 0:
+                content.append(
+                    f"\n  ▼ {below} more lines below", style="dim italic"
+                )
 
         # Footer line
         footer = Text("\n")
         if running:
-            footer.append("● ", style="cyan bold")
+            footer.append("● ", style="bright_green bold")
             footer.append("Running", style="cyan")
         elif rc == 0:
             footer.append("✓ ", style="green bold")
@@ -156,11 +229,14 @@ class LiveOutput:
 
         footer.append(f"  │  {total} lines", style="dim")
 
-        if hidden > 0:
+        if not expanded and hidden > 0:
             footer.append(f" ({hidden} hidden)", style="dim")
 
         toggle_label = "collapse" if expanded else "expand"
         footer.append(f"  │  Ctrl+O {toggle_label}", style="dim")
+
+        if expanded and total > self._view_height:
+            footer.append("  │  ↑↓ PgUp/Dn scroll", style="dim")
 
         border = "cyan" if running else ("green" if rc == 0 else "red")
 
@@ -191,6 +267,20 @@ def _start_key_reader(
                         ch = msvcrt.getch()
                         if ch == b"\x0f":  # Ctrl+O
                             live_output.toggle()
+                        elif ch in (b"\xe0", b"\x00"):
+                            scan = msvcrt.getch()
+                            if scan == b"H":  # Up arrow
+                                live_output.scroll_up()
+                            elif scan == b"P":  # Down arrow
+                                live_output.scroll_down()
+                            elif scan == b"I":  # Page Up
+                                live_output.page_up()
+                            elif scan == b"Q":  # Page Down
+                                live_output.page_down()
+                            elif scan == b"G":  # Home
+                                live_output.scroll_home()
+                            elif scan == b"O":  # End
+                                live_output.scroll_end()
                     stop.wait(0.05)
             else:
                 import select
@@ -206,6 +296,33 @@ def _start_key_reader(
                             ch = sys.stdin.read(1)
                             if ch == "\x0f":  # Ctrl+O
                                 live_output.toggle()
+                            elif ch == "\x1b":  # escape sequence
+                                if select.select([sys.stdin], [], [], 0.1)[0]:
+                                    ch2 = sys.stdin.read(1)
+                                    if ch2 == "[" and select.select(
+                                        [sys.stdin], [], [], 0.1
+                                    )[0]:
+                                        ch3 = sys.stdin.read(1)
+                                        if ch3 == "A":  # Up
+                                            live_output.scroll_up()
+                                        elif ch3 == "B":  # Down
+                                            live_output.scroll_down()
+                                        elif ch3 == "5":  # PgUp \x1b[5~
+                                            if select.select(
+                                                [sys.stdin], [], [], 0.1
+                                            )[0]:
+                                                sys.stdin.read(1)  # ~
+                                            live_output.page_up()
+                                        elif ch3 == "6":  # PgDn \x1b[6~
+                                            if select.select(
+                                                [sys.stdin], [], [], 0.1
+                                            )[0]:
+                                                sys.stdin.read(1)  # ~
+                                            live_output.page_down()
+                                        elif ch3 == "H":  # Home
+                                            live_output.scroll_home()
+                                        elif ch3 == "F":  # End
+                                            live_output.scroll_end()
                 finally:
                     termios.tcsetattr(fd, termios.TCSADRAIN, old)
         except Exception:

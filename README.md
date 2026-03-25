@@ -71,7 +71,16 @@ Launch the REPL for autocomplete and command history:
 | `/update` | Update Zephyr and modules |
 | `/clean [app]` | Remove build artifacts |
 
-Build and flash output is displayed in a collapsible live panel — press **Ctrl+O** to toggle between a compact tail view and the full log. On failure, relevant error context lines are extracted and printed automatically.
+Build and flash output is displayed in a collapsible live panel:
+
+| Key | Action |
+|-----|--------|
+| **Ctrl+O** | Toggle between compact tail view and expanded scrollable view |
+| **↑ / ↓** | Scroll line-by-line (expanded mode) |
+| **PgUp / PgDn** | Scroll by page (expanded mode) |
+| **Home / End** | Jump to top / bottom of output (expanded mode) |
+
+On failure, relevant error context lines are extracted and printed automatically.
 
 Commands without `/` are passed directly to the shell with the Zephyr environment (`ZEPHYR_BASE`, `ZEPHYR_SDK_INSTALL_DIR`, venv `PATH`) fully configured:
 
@@ -90,10 +99,22 @@ Board targets use Zephyr v4.x qualified format: `board/soc[/variant]`. Run `/boa
 
 Families: Atmel SAM, Atmel SAM0, Microchip MEC, Microchip PIC32C, Microchip SAM, Microchip Other (RISC-V).
 
+## App Module Dependencies
+
+The workspace ships with a base set of west modules (cmsis, hal_atmel, hal_microchip, etc.). If your app needs additional modules (e.g., LVGL), add a `west-requires.yml` to the app directory:
+
+```yaml
+# app/<app-dir>/west-requires.yml
+modules:
+  - lvgl
+```
+
+`/install` and `/update` automatically scan all `app/*/west-requires.yml` files, merge the listed modules into the manifest allowlist, and fetch them. The CLI prints which extras were added and which apps need them.
+
 ## Project Layout
 
 ```
-manifest/west.yml       West manifest (Zephyr version + module allowlist)
+manifest/west.yml       West manifest (Zephyr version + module allowlist, auto-generated)
 app/                    Zephyr applications (each with CMakeLists.txt, prj.conf, src/)
 tools/zephyr_cli/       Python CLI source
 scripts/setup.ps1       PowerShell bootstrap (alternative to /install)

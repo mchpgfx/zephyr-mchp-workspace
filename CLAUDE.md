@@ -60,8 +60,8 @@ When using a fork with a branch revision (not a tag or SHA), `zephyr/` is checke
 
 ### Workspace Layout
 
-- **`manifest/west.yml`** — West manifest defining Zephyr version and module allowlist. This is the source of truth for dependency versions.
-- **`app/`** — Application source code. Each subdirectory is a buildable Zephyr application with its own `CMakeLists.txt`, `prj.conf`, and `src/`.
+- **`manifest/west.yml`** — West manifest defining Zephyr version and module allowlist. Generated dynamically by `/install` and `/update` from base modules + app requirements. This is the source of truth for dependency versions.
+- **`app/`** — Application source code. Each subdirectory is a buildable Zephyr application with its own `CMakeLists.txt`, `prj.conf`, and `src/`. Apps can declare additional west module dependencies via `west-requires.yml`.
 - **`tools/zephyr_cli/`** — Custom Python interactive CLI (REPL) built with `prompt_toolkit` + `rich`.
 - **`scripts/setup.ps1`** — PowerShell bootstrap script (venv, pip, west init, west update, zephyr-export).
 - **`zephyr.bat` / `zephyr.ps1`** — Windows entry points that auto-create venv and launch `python -m tools.zephyr_cli`.
@@ -79,8 +79,8 @@ When using a fork with a branch revision (not a tag or SHA), `zephyr/` is checke
 ### CLI Module Structure (`tools/zephyr_cli/`)
 
 - **`cli.py`** — Main REPL loop, command dispatch, autocomplete (`ZephyrCompleter`)
-- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), dynamic board discovery (`get_boards()`, `get_all_boards()` — scans `zephyr/boards/` at runtime), `get_apps()` helper, `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility, platform helpers (`_host_platform()`, `_venv_bin()`, `_exe()`)
-- **`live_output.py`** — Collapsible Rich Live subprocess output panel. `run_live()` runs a command with a bordered panel showing the last N lines (Ctrl+O toggles expand/collapse). `print_error_context()` extracts and displays lines around error matches on failure.
+- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), dynamic board discovery (`get_boards()`, `get_all_boards()` — scans `zephyr/boards/` at runtime), `get_apps()` helper, `get_app_required_modules()` (scans `app/*/west-requires.yml` for extra west module deps), `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility, platform helpers (`_host_platform()`, `_venv_bin()`, `_exe()`)
+- **`live_output.py`** — Collapsible Rich Live subprocess output panel. `run_live()` runs a command with a bordered panel showing the last N lines (Ctrl+O toggles expand/collapse; expanded mode is a scrollable window — arrow keys scroll line-by-line, PgUp/PgDn by page, Home/End to top/bottom). `print_error_context()` extracts and displays lines around error matches on failure.
 - **`commands/`** — One module per command: `install.py`, `sdk.py`, `build.py`, `flash.py`, `create_app.py`, `update.py`
 - Entry point: `__main__.py` calls `cli.main()`
 
@@ -89,13 +89,25 @@ When using a fork with a branch revision (not a tag or SHA), `zephyr/` is checke
 Each app under `app/` follows this pattern:
 ```
 app/<name>/
-├── CMakeLists.txt    # find_package(Zephyr), project(), target_sources()
-├── prj.conf          # Kconfig options (e.g., CONFIG_GPIO=y)
+├── CMakeLists.txt       # find_package(Zephyr), project(), target_sources()
+├── prj.conf             # Kconfig options (e.g., CONFIG_GPIO=y)
+├── west-requires.yml    # (optional) extra west modules needed by this app
 └── src/
     └── main.c
 ```
 
 Build system is CMake 3.20+ using Zephyr's CMake package. Board-specific configuration goes in overlay files or board-specific conf fragments.
+
+### App Module Dependencies
+
+Apps can declare additional west modules they need in `west-requires.yml`:
+
+```yaml
+modules:
+  - lvgl
+```
+
+`/install` and `/update` scan all `app/*/west-requires.yml` files and merge the required modules into the manifest's `name-allowlist` alongside the base modules (cmsis, cmsis_6, hal_atmel, hal_microchip, picolibc). The CLI reports which extra modules were added and which apps require them.
 
 ### Build Flow
 

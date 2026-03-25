@@ -15,6 +15,7 @@ from rich.progress import (
 
 from ..config import (
     WORKSPACE_ROOT, VENV_DIR, REQUIREMENTS, _venv_bin, _exe,
+    get_app_required_modules,
 )
 from .sdk import (
     SDK_DIR, TOOLCHAINS,
@@ -23,8 +24,11 @@ from .sdk import (
     _register_sdk, _run_zephyr_export,
 )
 
-# Modules we expect west to fetch (for progress tracking)
-WEST_MODULES = ["zephyr", "cmsis", "cmsis_6", "hal_atmel", "hal_microchip", "picolibc"]
+BASE_MODULES = ["cmsis", "cmsis_6", "hal_atmel", "hal_microchip", "picolibc"]
+
+# Modules we expect west to fetch (for progress tracking).
+# Rebuilt dynamically by run() after scanning app requirements.
+WEST_MODULES = ["zephyr"] + BASE_MODULES
 
 MANIFEST_PATH = os.path.join(WORKSPACE_ROOT, "manifest", "west.yml")
 
@@ -92,7 +96,12 @@ def _get_latest_stable(console: Console) -> str:
     return tags[-1]
 
 
-def _write_manifest(revision: str, repo_url: str | None, console: Console) -> None:
+def _write_manifest(
+    revision: str,
+    repo_url: str | None,
+    console: Console,
+    extra_modules: list[str] = (),
+) -> None:
     """Write manifest/west.yml with the specified Zephyr source."""
     if repo_url:
         # Fork: strip trailing /zephyr or /zephyr.git so url-base is the org root
@@ -104,6 +113,9 @@ def _write_manifest(revision: str, repo_url: str | None, console: Console) -> No
         url_base = clean
     else:
         url_base = DEFAULT_ZEPHYR_REPO
+
+    all_modules = sorted(set(BASE_MODULES) | set(extra_modules))
+    allowlist = "".join(f"          - {m}\n" for m in all_modules)
 
     manifest = (
         "manifest:\n"
@@ -117,11 +129,7 @@ def _write_manifest(revision: str, repo_url: str | None, console: Console) -> No
         f"      revision: {revision}\n"
         "      import:\n"
         "        name-allowlist:\n"
-        "          - cmsis\n"
-        "          - cmsis_6\n"
-        "          - hal_atmel\n"
-        "          - hal_microchip\n"
-        "          - picolibc\n"
+        f"{allowlist}"
         "\n"
         "  self:\n"
         "    path: manifest\n"
@@ -223,9 +231,15 @@ def run(args: list[str], console: Console) -> None:
 
     # -- 4. Configure manifest ---------------------------------------------
     next_step("Configuring Zephyr source...")
-    _write_manifest(zephyr_ref, zephyr_repo, console)
+    app_modules, module_map = get_app_required_modules()
+    _write_manifest(zephyr_ref, zephyr_repo, console, extra_modules=app_modules)
     source_label = zephyr_repo or DEFAULT_ZEPHYR_REPO
     console.print(f"        [green]OK[/] Zephyr {zephyr_ref} from {source_label}")
+    if app_modules:
+        global WEST_MODULES
+        WEST_MODULES = ["zephyr"] + sorted(set(BASE_MODULES) | set(app_modules))
+        for mod, apps in sorted(module_map.items()):
+            console.print(f"        [green]+[/] {mod} [dim](required by {', '.join(apps)})[/]")
 
     # -- 5. west init ------------------------------------------------------
     next_step("Initializing west workspace...")
