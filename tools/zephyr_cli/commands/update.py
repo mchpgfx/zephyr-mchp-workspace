@@ -4,14 +4,47 @@ import subprocess
 
 from rich.console import Console
 
-from ..config import WORKSPACE_ROOT
-from .install import _run_west_update, _attach_zephyr_branch, _read_current_manifest
+from ..config import WORKSPACE_ROOT, get_app_required_modules
+from .install import (
+    _run_west_update, _attach_zephyr_branch, _read_current_manifest,
+    _write_manifest, BASE_MODULES, WEST_MODULES,
+)
 from .sdk import _register_sdk, _run_zephyr_export
 
 
 def run(args: list[str], console: Console) -> None:
     from ..config import _find_west
     west = _find_west()
+
+    # Pull existing app packs
+    from .apps import load_installed
+    import os
+    installed = load_installed()
+    if installed:
+        console.print("  [cyan]*[/] Pulling app packs...")
+        for name, info in sorted(installed.items()):
+            dest = os.path.join(WORKSPACE_ROOT, "app", name)
+            if not os.path.isdir(os.path.join(dest, ".git")):
+                continue
+            result = subprocess.run(
+                ["git", "-C", dest, "pull", "--ff-only"],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                console.print(f"    [green]OK[/] {name}")
+            else:
+                console.print(f"    [yellow]![/] {name}: {result.stderr.strip()}")
+
+    # Re-scan app requirements and refresh manifest before fetching
+    app_modules, module_map = get_app_required_modules()
+    import tools.zephyr_cli.commands.install as _inst
+    ref, url = _read_current_manifest()
+    repo = url if url != _inst.DEFAULT_ZEPHYR_REPO else None
+    _write_manifest(ref, repo, console, extra_modules=app_modules)
+    if app_modules:
+        _inst.WEST_MODULES = ["zephyr"] + sorted(set(BASE_MODULES) | set(app_modules))
+        for mod, apps in sorted(module_map.items()):
+            console.print(f"  [green]+[/] {mod} [dim](required by {', '.join(apps)})[/]")
 
     console.print("  [cyan]*[/] Updating modules...")
     _run_west_update(west, console)

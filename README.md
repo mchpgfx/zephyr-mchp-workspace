@@ -4,7 +4,7 @@ Zephyr RTOS workspace targeting Microchip and Atmel boards (ARM Cortex-M/R/A, RI
 
 ## Requirements
 
-- **Python 3.10+**
+- **Python 3.12+**
 - **Git 2.x+**
 - **Windows 10/11**, **Linux**, or **macOS**
 
@@ -14,7 +14,7 @@ Everything else (west, CMake, ninja, Zephyr SDK, cross-compilers) is installed a
 
 **Windows:**
 ```
-git clone <this-repo> && cd zephyr-mchp-workspace
+git clone https://github.com/mchpgfx/zephyr-mchp-workspace.git && cd zephyr-mchp-workspace
 
 .\zephyr.bat /install              # full setup: venv, Zephyr, SDK, ARM toolchain
 .\zephyr.bat /build blinky -b sam_e70_xplained/same70q21
@@ -22,7 +22,7 @@ git clone <this-repo> && cd zephyr-mchp-workspace
 
 **Linux / macOS:**
 ```
-git clone <this-repo> && cd zephyr-mchp-workspace
+git clone https://github.com/mchpgfx/zephyr-mchp-workspace.git && cd zephyr-mchp-workspace
 
 chmod +x zephyr.sh
 ./zephyr.sh /install               # full setup: venv, Zephyr, SDK, ARM toolchain
@@ -65,13 +65,13 @@ Launch the REPL for autocomplete and command history:
 | `/create-app <name>` | Scaffold a new app under `app/` |
 | `/status` | Comprehensive workspace summary |
 | `/boards` | List supported boards |
-| `/apps` | List available applications |
+| `/apps` | List apps; `/apps --add` to manage packs |
 | `/sdk --status` | Show installed SDK and toolchains |
 | `/sdk --riscv` | Add RISC-V toolchain |
 | `/update` | Update Zephyr and modules |
 | `/clean [app]` | Remove build artifacts |
 
-Build and flash output is displayed in a collapsible live panel — press **Ctrl+O** to toggle between a compact tail view and the full log. On failure, relevant error context lines are extracted and printed automatically.
+Build and flash output is displayed in a live panel.
 
 Commands without `/` are passed directly to the shell with the Zephyr environment (`ZEPHYR_BASE`, `ZEPHYR_SDK_INSTALL_DIR`, venv `PATH`) fully configured:
 
@@ -90,11 +90,44 @@ Board targets use Zephyr v4.x qualified format: `board/soc[/variant]`. Run `/boa
 
 Families: Atmel SAM, Atmel SAM0, Microchip MEC, Microchip PIC32C, Microchip SAM, Microchip Other (RISC-V).
 
+## App Packs
+
+Pre-built Microchip app packs can be installed from the community registry. During `/install`, the CLI fetches the registry and presents an interactive selector:
+
+```
+  Available app packs:
+
+  [x] mgs_zephyr_lvgl    MGS LVGL graphics demos (XLCDC, maXTouch)    +lvgl
+
+  Space: toggle  |  Enter: confirm  |  Ctrl+C: skip
+```
+
+Selected packs are cloned into `app/` and their module dependencies are merged into the manifest automatically. Use `/apps --add` to add or remove packs at any time. `/update` pulls the latest for all installed packs.
+
+Pack apps are referenced with their pack prefix:
+```
+/build mgs_zephyr_lvgl/mgsz_lvgl_sama7d65_cu_ac69t88a_test -b sama7d65_curiosity
+```
+
+Local standalone apps (`/create-app myapp`) continue to work as before.
+
+## App Module Dependencies
+
+Apps and packs can declare additional west modules via `west-requires.yml`:
+
+```yaml
+# app/<app-or-pack>/west-requires.yml
+modules:
+  - lvgl
+```
+
+`/install` and `/update` automatically scan all `app/*/west-requires.yml` files, merge the listed modules into the manifest allowlist, and fetch them. The CLI prints which extras were added and which apps need them.
+
 ## Project Layout
 
 ```
-manifest/west.yml       West manifest (Zephyr version + module allowlist)
-app/                    Zephyr applications (each with CMakeLists.txt, prj.conf, src/)
+manifest/west.yml       West manifest (Zephyr version + module allowlist, auto-generated)
+app/                    Zephyr applications (standalone apps + cloned app packs)
 tools/zephyr_cli/       Python CLI source
 scripts/setup.ps1       PowerShell bootstrap (alternative to /install)
 zephyr.bat / zephyr.ps1 Windows entry points

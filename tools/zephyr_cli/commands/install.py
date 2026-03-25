@@ -15,6 +15,7 @@ from rich.progress import (
 
 from ..config import (
     WORKSPACE_ROOT, VENV_DIR, REQUIREMENTS, _venv_bin, _exe,
+    get_app_required_modules,
 )
 from .sdk import (
     SDK_DIR, TOOLCHAINS,
@@ -23,8 +24,11 @@ from .sdk import (
     _register_sdk, _run_zephyr_export,
 )
 
-# Modules we expect west to fetch (for progress tracking)
-WEST_MODULES = ["zephyr", "cmsis", "cmsis_6", "hal_atmel", "hal_microchip", "picolibc"]
+BASE_MODULES = ["cmsis", "cmsis_6", "hal_atmel", "hal_microchip", "picolibc"]
+
+# Modules we expect west to fetch (for progress tracking).
+# Rebuilt dynamically by run() after scanning app requirements.
+WEST_MODULES = ["zephyr"] + BASE_MODULES
 
 MANIFEST_PATH = os.path.join(WORKSPACE_ROOT, "manifest", "west.yml")
 
@@ -92,7 +96,12 @@ def _get_latest_stable(console: Console) -> str:
     return tags[-1]
 
 
-def _write_manifest(revision: str, repo_url: str | None, console: Console) -> None:
+def _write_manifest(
+    revision: str,
+    repo_url: str | None,
+    console: Console,
+    extra_modules: list[str] = (),
+) -> None:
     """Write manifest/west.yml with the specified Zephyr source."""
     if repo_url:
         # Fork: strip trailing /zephyr or /zephyr.git so url-base is the org root
@@ -104,6 +113,9 @@ def _write_manifest(revision: str, repo_url: str | None, console: Console) -> No
         url_base = clean
     else:
         url_base = DEFAULT_ZEPHYR_REPO
+
+    all_modules = sorted(set(BASE_MODULES) | set(extra_modules))
+    allowlist = "".join(f"          - {m}\n" for m in all_modules)
 
     manifest = (
         "manifest:\n"
@@ -117,11 +129,7 @@ def _write_manifest(revision: str, repo_url: str | None, console: Console) -> No
         f"      revision: {revision}\n"
         "      import:\n"
         "        name-allowlist:\n"
-        "          - cmsis\n"
-        "          - cmsis_6\n"
-        "          - hal_atmel\n"
-        "          - hal_microchip\n"
-        "          - picolibc\n"
+        f"{allowlist}"
         "\n"
         "  self:\n"
         "    path: manifest\n"
@@ -179,7 +187,7 @@ def run(args: list[str], console: Console) -> None:
             zephyr_repo = current_url
 
     # -- Step counter
-    total_steps = 8 + len(toolchains_to_install)
+    total_steps = 10 + len(toolchains_to_install)
     step = 0
 
     def next_step(msg):
@@ -221,11 +229,41 @@ def run(args: list[str], console: Console) -> None:
     from ..config import _find_west
     west = _find_west()
 
-    # -- 4. Configure manifest ---------------------------------------------
+    # -- 4. Select app packs -----------------------------------------------
+    from .apps import fetch_registry, select_packs, clone_or_pull_packs, load_installed
+
+    next_step("Fetching app pack registry...")
+    registry = fetch_registry(console)
+    if registry:
+        console.print(f"        [green]OK[/] {len(registry)} pack(s) available")
+    else:
+        console.print("        [dim]No packs available (offline or empty registry)[/]")
+
+    # -- 5. Clone/pull selected packs --------------------------------------
+    next_step("Selecting app packs...")
+    if registry:
+        installed = load_installed()
+        selected = select_packs(registry, installed, console)
+        if selected is None:
+            console.print("        [dim]Skipped[/]")
+        elif selected:
+            clone_or_pull_packs(selected, console)
+        else:
+            console.print("        [dim]No packs selected[/]")
+    else:
+        console.print("        [dim]Skipped (no registry)[/]")
+
+    # -- 6. Configure manifest ---------------------------------------------
     next_step("Configuring Zephyr source...")
-    _write_manifest(zephyr_ref, zephyr_repo, console)
+    app_modules, module_map = get_app_required_modules()
+    _write_manifest(zephyr_ref, zephyr_repo, console, extra_modules=app_modules)
     source_label = zephyr_repo or DEFAULT_ZEPHYR_REPO
     console.print(f"        [green]OK[/] Zephyr {zephyr_ref} from {source_label}")
+    if app_modules:
+        global WEST_MODULES
+        WEST_MODULES = ["zephyr"] + sorted(set(BASE_MODULES) | set(app_modules))
+        for mod, apps in sorted(module_map.items()):
+            console.print(f"        [green]+[/] {mod} [dim](required by {', '.join(apps)})[/]")
 
     # -- 5. west init ------------------------------------------------------
     next_step("Initializing west workspace...")
@@ -308,7 +346,7 @@ def run(args: list[str], console: Console) -> None:
             "(for mpfs_icicle, m2gl025_miv)[/]"
         )
     console.print()
-    console.print("  Now try: [bold]/build blinky -b sam_e70_xplained[/]")
+    console.print("  Now try: [bold]/build blinky -b sam_e70_xplained/same70q21[/]")
 
 
 def _run_west_update(west: str, console: Console) -> None:
@@ -328,6 +366,7 @@ def _run_west_update(west: str, console: Console) -> None:
     finished = [0]          # number of fully completed modules
     mod_pct = [0]           # 0-99 progress within current module
     mod_name = [""]         # current module name
+    mod_counted = [False]   # whether current module was counted in finished
     modules_seen = []       # ordered list of module names
     git_phase = [""]        # e.g. "Receiving objects"
 
@@ -355,8 +394,9 @@ def _run_west_update(west: str, console: Console) -> None:
         def _finish_module():
             """Mark the current module as complete."""
             with lock:
-                if mod_name[0] and mod_pct[0] < 100:
+                if mod_name[0] and not mod_counted[0]:
                     finished[0] += 1
+                    mod_counted[0] = True
                 mod_pct[0] = 0
                 git_phase[0] = ""
 
@@ -371,6 +411,7 @@ def _run_west_update(west: str, console: Console) -> None:
                     with lock:
                         mod_name[0] = name
                         mod_pct[0] = 0
+                        mod_counted[0] = False
                         if name not in modules_seen:
                             modules_seen.append(name)
                             if name not in WEST_MODULES:

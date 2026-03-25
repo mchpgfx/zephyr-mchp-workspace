@@ -1,7 +1,7 @@
 """Collapsible live output panel for subprocess commands.
 
 Shows the last N lines of output in a bordered panel during execution.
-Press Ctrl+O to toggle between collapsed (tail) and expanded (full) views.
+Press Ctrl+O to dump the full log to the terminal (native scroll).
 """
 
 import re
@@ -81,7 +81,7 @@ def print_error_context(lines: list[str], console: Console) -> None:
 
 
 class LiveOutput:
-    """Manages collapsible subprocess output state."""
+    """Manages live subprocess output panel state."""
 
     def __init__(self, title: str, console: Console, tail: int = TAIL_LINES):
         self.title = title
@@ -92,6 +92,7 @@ class LiveOutput:
         self._lock = threading.Lock()
         self._running = True
         self._rc: int | None = None
+        self._interrupted = False
 
     @property
     def line_count(self) -> int:
@@ -106,47 +107,56 @@ class LiveOutput:
         with self._lock:
             self._expanded = not self._expanded
 
-    def finish(self, return_code: int) -> None:
+    def finish(self, return_code: int, interrupted: bool = False) -> None:
         with self._lock:
             self._running = False
             self._rc = return_code
+            self._interrupted = interrupted
 
     def get_lines(self) -> list[str]:
         with self._lock:
             return list(self._lines)
 
+    def __rich_console__(self, console, options):
+        """Make LiveOutput a Rich renderable so Live can refresh it."""
+        yield self.render()
+
     def render(self) -> Panel:
         with self._lock:
-            lines = list(self._lines)
+            total = len(self._lines)
             expanded = self._expanded
             running = self._running
             rc = self._rc
 
-        total = len(lines)
-
-        if expanded or total <= self.tail:
-            visible = lines
-            hidden = 0
-        else:
-            visible = lines[-self.tail:]
-            hidden = total - self.tail
+            # Expanded: fill terminal height. Collapsed: tail lines.
+            n = max(10, self.console.height - 6) if expanded else self.tail
+            if total <= n:
+                visible = list(self._lines)
+                hidden = 0
+            else:
+                visible = self._lines[-n:]
+                hidden = total - n
 
         # no_wrap + ellipsis stops long lines from wrapping (prevents
         # the panel height from jumping).
-        content = Text(no_wrap=True, overflow="ellipsis")
-        if visible:
+        if not visible:
+            content = Text("Waiting for output...", style="dim")
+        else:
+            content = Text(no_wrap=True, overflow="ellipsis")
             for i, line in enumerate(visible):
                 content.append(line)
                 if i < len(visible) - 1:
                     content.append("\n")
-        else:
-            content = Text("Waiting for output...", style="dim")
 
         # Footer line
+        interrupted = not running and self._interrupted
         footer = Text("\n")
         if running:
-            footer.append("● ", style="cyan bold")
+            footer.append("● ", style="bright_green bold")
             footer.append("Running", style="cyan")
+        elif interrupted:
+            footer.append("■ ", style="yellow bold")
+            footer.append("Interrupted", style="yellow")
         elif rc == 0:
             footer.append("✓ ", style="green bold")
             footer.append("Done", style="green")
@@ -160,9 +170,16 @@ class LiveOutput:
             footer.append(f" ({hidden} hidden)", style="dim")
 
         toggle_label = "collapse" if expanded else "expand"
-        footer.append(f"  │  Ctrl+O {toggle_label}", style="dim")
+        footer.append(f"  │  ctrl+o {toggle_label}", style="dim")
 
-        border = "cyan" if running else ("green" if rc == 0 else "red")
+        if running:
+            border = "cyan"
+        elif interrupted:
+            border = "yellow"
+        elif rc == 0:
+            border = "green"
+        else:
+            border = "red"
 
         return Panel(
             Group(content, footer),
@@ -191,6 +208,8 @@ def _start_key_reader(
                         ch = msvcrt.getch()
                         if ch == b"\x0f":  # Ctrl+O
                             live_output.toggle()
+                        elif ch in (b"\xe0", b"\x00"):
+                            msvcrt.getch()  # consume scan code
                     stop.wait(0.05)
             else:
                 import select
@@ -249,23 +268,22 @@ def run_live(
         )
 
         with Live(
-            lo.render(), console=console, refresh_per_second=8, transient=True
+            lo, console=console, refresh_per_second=4, transient=True
         ) as live:
             try:
                 for line in proc.stdout:
                     lo.add_line(line.rstrip())
-                    live.update(lo.render())
             except KeyboardInterrupt:
                 proc.kill()
                 proc.wait()
-                lo.finish(proc.returncode or -1)
-                live.update(lo.render())
-                console.print("  [yellow]Interrupted[/]")
-                return proc.returncode or -1, time.time() - t0, lo.get_lines()
+                lo.finish(proc.returncode or -1, interrupted=True)
+                live.refresh()
+                time.sleep(1)
+                return None, time.time() - t0, lo.get_lines()
 
             proc.wait()
             lo.finish(proc.returncode)
-            live.update(lo.render())
+            live.refresh()
     finally:
         stop.set()
         if key_thread:
