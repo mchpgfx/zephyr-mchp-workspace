@@ -14,7 +14,7 @@ Everything else (west, CMake, ninja, Zephyr SDK, cross-compilers) is installed a
 
 **Windows:**
 ```
-git clone <this-repo> && cd zephyr-mchp-workspace
+git clone https://github.com/mchpgfx/zephyr-mchp-workspace.git && cd zephyr-mchp-workspace
 
 .\zephyr.bat /install              # full setup: venv, Zephyr, SDK, ARM toolchain
 .\zephyr.bat /build blinky -b sam_e70_xplained/same70q21
@@ -22,7 +22,7 @@ git clone <this-repo> && cd zephyr-mchp-workspace
 
 **Linux / macOS:**
 ```
-git clone <this-repo> && cd zephyr-mchp-workspace
+git clone https://github.com/mchpgfx/zephyr-mchp-workspace.git && cd zephyr-mchp-workspace
 
 chmod +x zephyr.sh
 ./zephyr.sh /install               # full setup: venv, Zephyr, SDK, ARM toolchain
