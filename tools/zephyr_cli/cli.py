@@ -20,7 +20,7 @@ from .config import (
     get_apps, BUILD_DIR, VENV_DIR, zephyr_env,
     _venv_bin, _exe,
 )
-from .commands import install, update, build, flash, create_app, sdk
+from .commands import install, update, build, flash, create_app, sdk, apps
 from .live_output import run_live
 
 
@@ -35,7 +35,7 @@ COMMANDS = {
     "/create-app":  "Scaffold a new application",
     "/status":      "Show workspace status (Zephyr, SDK, toolchains, apps)",
     "/boards":      "List supported Microchip/Atmel boards",
-    "/apps":        "List available applications",
+    "/apps":        "List apps or manage packs:  /apps [--add]",
     "/clean":       "Remove build artifacts:  /clean [app]",
     "/help":        "Show this help",
     "/quit":        "Exit",
@@ -128,6 +128,17 @@ class ZephyrCompleter(Completer):
 
         # /create-app: no completions (free-form name)
 
+        # /apps completions
+        elif cmd == "/apps":
+            apps_opts = ["--add"]
+            if n == 1 and text.endswith(" "):
+                for o in apps_opts:
+                    yield Completion(o)
+            elif n == 2 and not text.endswith(" "):
+                for o in apps_opts:
+                    if o.startswith(words[1]):
+                        yield Completion(o, start_position=-len(words[1]))
+
         # /clean completions
         elif cmd == "/clean":
             if n == 1 and text.endswith(" "):
@@ -155,12 +166,7 @@ def cmd_boards(args, console):
 
 
 def cmd_apps(args, console):
-    apps = get_apps()
-    if not apps:
-        console.print("  No apps found. Create one with [bold]/create-app[/]")
-        return
-    for a in apps:
-        console.print(f"  [bold]{a}[/]  ->  app/{a}/")
+    apps.run(args, console)
 
 
 def cmd_clean(args, console):

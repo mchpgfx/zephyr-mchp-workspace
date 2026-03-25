@@ -16,6 +16,25 @@ def run(args: list[str], console: Console) -> None:
     from ..config import _find_west
     west = _find_west()
 
+    # Pull existing app packs
+    from .apps import load_installed
+    import os
+    installed = load_installed()
+    if installed:
+        console.print("  [cyan]*[/] Pulling app packs...")
+        for name, info in sorted(installed.items()):
+            dest = os.path.join(WORKSPACE_ROOT, "app", name)
+            if not os.path.isdir(os.path.join(dest, ".git")):
+                continue
+            result = subprocess.run(
+                ["git", "-C", dest, "pull", "--ff-only"],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                console.print(f"    [green]OK[/] {name}")
+            else:
+                console.print(f"    [yellow]![/] {name}: {result.stderr.strip()}")
+
     # Re-scan app requirements and refresh manifest before fetching
     app_modules, module_map = get_app_required_modules()
     import tools.zephyr_cli.commands.install as _inst

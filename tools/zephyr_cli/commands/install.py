@@ -187,7 +187,7 @@ def run(args: list[str], console: Console) -> None:
             zephyr_repo = current_url
 
     # -- Step counter
-    total_steps = 8 + len(toolchains_to_install)
+    total_steps = 10 + len(toolchains_to_install)
     step = 0
 
     def next_step(msg):
@@ -229,7 +229,31 @@ def run(args: list[str], console: Console) -> None:
     from ..config import _find_west
     west = _find_west()
 
-    # -- 4. Configure manifest ---------------------------------------------
+    # -- 4. Select app packs -----------------------------------------------
+    from .apps import fetch_registry, select_packs, clone_or_pull_packs, load_installed
+
+    next_step("Fetching app pack registry...")
+    registry = fetch_registry(console)
+    if registry:
+        console.print(f"        [green]OK[/] {len(registry)} pack(s) available")
+    else:
+        console.print("        [dim]No packs available (offline or empty registry)[/]")
+
+    # -- 5. Clone/pull selected packs --------------------------------------
+    next_step("Selecting app packs...")
+    if registry:
+        installed = load_installed()
+        selected = select_packs(registry, installed, console)
+        if selected is None:
+            console.print("        [dim]Skipped[/]")
+        elif selected:
+            clone_or_pull_packs(selected, console)
+        else:
+            console.print("        [dim]No packs selected[/]")
+    else:
+        console.print("        [dim]Skipped (no registry)[/]")
+
+    # -- 6. Configure manifest ---------------------------------------------
     next_step("Configuring Zephyr source...")
     app_modules, module_map = get_app_required_modules()
     _write_manifest(zephyr_ref, zephyr_repo, console, extra_modules=app_modules)

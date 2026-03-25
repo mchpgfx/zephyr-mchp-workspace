@@ -61,7 +61,7 @@ When using a fork with a branch revision (not a tag or SHA), `zephyr/` is checke
 ### Workspace Layout
 
 - **`manifest/west.yml`** — West manifest defining Zephyr version and module allowlist. Generated dynamically by `/install` and `/update` from base modules + app requirements. This is the source of truth for dependency versions.
-- **`app/`** — Application source code. Each subdirectory is a buildable Zephyr application with its own `CMakeLists.txt`, `prj.conf`, and `src/`. Apps can declare additional west module dependencies via `west-requires.yml`.
+- **`app/`** — Application source code. Contains standalone apps (direct subdirectories with `CMakeLists.txt`) and app packs (cloned repos containing multiple apps). Packs are managed via `/apps --add` and tracked in `app/.repos.json`. Apps can declare additional west module dependencies via `west-requires.yml`.
 - **`tools/zephyr_cli/`** — Custom Python interactive CLI (REPL) built with `prompt_toolkit` + `rich`.
 - **`scripts/setup.ps1`** — PowerShell bootstrap script (venv, pip, west init, west update, zephyr-export).
 - **`zephyr.bat` / `zephyr.ps1`** — Windows entry points that auto-create venv and launch `python -m tools.zephyr_cli`.
@@ -79,39 +79,55 @@ When using a fork with a branch revision (not a tag or SHA), `zephyr/` is checke
 ### CLI Module Structure (`tools/zephyr_cli/`)
 
 - **`cli.py`** — Main REPL loop, command dispatch, autocomplete (`ZephyrCompleter`)
-- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), dynamic board discovery (`get_boards()`, `get_all_boards()` — scans `zephyr/boards/` at runtime), `get_apps()` helper, `get_app_required_modules()` (scans `app/*/west-requires.yml` for extra west module deps), `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility, platform helpers (`_host_platform()`, `_venv_bin()`, `_exe()`)
+- **`config.py`** — Paths (`WORKSPACE_ROOT`, `APP_DIR`, `BUILD_DIR`), dynamic board discovery (`get_boards()`, `get_all_boards()` — scans `zephyr/boards/` at runtime), `get_apps()` (returns standalone apps as `name` and pack apps as `pack/name` by detecting `CMakeLists.txt`), `get_app_required_modules()` (scans `app/*/west-requires.yml` for extra west module deps), `zephyr_env()` (builds env dict with PATH/ZEPHYR_BASE/SDK), `run_cmd()` utility, platform helpers (`_host_platform()`, `_venv_bin()`, `_exe()`)
 - **`live_output.py`** — Collapsible Rich Live subprocess output panel. `run_live()` runs a command with a bordered panel showing the last N lines (Ctrl+O toggles expand/collapse; expanded mode is a scrollable window — arrow keys scroll line-by-line, PgUp/PgDn by page, Home/End to top/bottom). `print_error_context()` extracts and displays lines around error matches on failure.
-- **`commands/`** — One module per command: `install.py`, `sdk.py`, `build.py`, `flash.py`, `create_app.py`, `update.py`
+- **`commands/`** — One module per command: `install.py`, `sdk.py`, `build.py`, `flash.py`, `create_app.py`, `update.py`, `apps.py`
 - Entry point: `__main__.py` calls `cli.main()`
 
 ### Application Structure (Zephyr convention)
 
-Each app under `app/` follows this pattern:
+Apps live under `app/` in two forms:
+
+**Standalone apps** (have `CMakeLists.txt` at root):
 ```
-app/<name>/
-├── CMakeLists.txt       # find_package(Zephyr), project(), target_sources()
-├── prj.conf             # Kconfig options (e.g., CONFIG_GPIO=y)
-├── west-requires.yml    # (optional) extra west modules needed by this app
-└── src/
-    └── main.c
+app/blinky/
+├── CMakeLists.txt
+├── prj.conf
+└── src/main.c
 ```
+
+**App packs** (cloned repos with multiple apps + root `west-requires.yml`):
+```
+app/mgs_zephyr_lvgl/              # cloned pack repo
+├── west-requires.yml             # module deps for all apps in this pack
+└── mgsz_lvgl_sama7d65_cu_ac69t88a_test/
+    ├── CMakeLists.txt
+    ├── app/
+    └── drivers/
+```
+
+Pack apps are referenced as `pack/app` (e.g., `/build mgs_zephyr_lvgl/mgsz_lvgl_sama7d65_cu_ac69t88a_test -b ...`).
 
 Build system is CMake 3.20+ using Zephyr's CMake package. Board-specific configuration goes in overlay files or board-specific conf fragments.
 
+### App Packs
+
+App packs are distributed via a registry hosted at `mchpgfx/zephyr-mchp-workspace-apps` (JSON file listing available repos). During `/install`, the CLI fetches the registry and presents an interactive selector to choose which packs to clone. Selections are persisted in `app/.repos.json`. `/update` pulls existing packs automatically. `/apps --add` re-triggers the selector.
+
 ### App Module Dependencies
 
-Apps can declare additional west modules they need in `west-requires.yml`:
+Apps and packs can declare additional west modules they need in `west-requires.yml`:
 
 ```yaml
 modules:
   - lvgl
 ```
 
-`/install` and `/update` scan all `app/*/west-requires.yml` files and merge the required modules into the manifest's `name-allowlist` alongside the base modules (cmsis, cmsis_6, hal_atmel, hal_microchip, picolibc). The CLI reports which extra modules were added and which apps require them.
+`/install` and `/update` scan all `app/*/west-requires.yml` files (standalone apps and pack roots) and merge the required modules into the manifest's `name-allowlist` alongside the base modules (cmsis, cmsis_6, hal_atmel, hal_microchip, picolibc). The CLI reports which extra modules were added and which apps require them.
 
 ### Build Flow
 
-`/build <app> -b <board>` runs `west build -d build/<app> app/<app> -b <board>`. All commands (build, shell pass-through, etc.) use `zephyr_env()` from `config.py` which sets `PATH`, `ZEPHYR_BASE`, and `ZEPHYR_SDK_INSTALL_DIR` automatically.
+`/build <app> -b <board>` runs `west build -d build/<app> app/<app> -b <board>`. For pack apps the path includes the pack prefix (e.g., `app/mgs_zephyr_lvgl/demo_app`). All commands (build, shell pass-through, etc.) use `zephyr_env()` from `config.py` which sets `PATH`, `ZEPHYR_BASE`, and `ZEPHYR_SDK_INSTALL_DIR` automatically.
 
 ## Board Families
 

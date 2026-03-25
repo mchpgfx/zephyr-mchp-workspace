@@ -187,25 +187,52 @@ def invalidate_board_cache() -> None:
 
 # ── Helpers ───────────────────────────────────────────────────────
 def get_apps():
-    """Return sorted list of app directory names under app/."""
+    """Return sorted list of buildable app paths relative to app/.
+
+    Standalone apps (have CMakeLists.txt):  ``'blinky'``
+    Pack apps (subdirs with CMakeLists.txt): ``'mgs_zephyr_lvgl/demo_app'``
+    """
     if not os.path.isdir(APP_DIR):
         return []
-    return sorted(
-        d for d in os.listdir(APP_DIR)
-        if os.path.isdir(os.path.join(APP_DIR, d))
-    )
+    apps: list[str] = []
+    for d in os.listdir(APP_DIR):
+        full = os.path.join(APP_DIR, d)
+        if not os.path.isdir(full) or d.startswith("."):
+            continue
+        if os.path.isfile(os.path.join(full, "CMakeLists.txt")):
+            # Standalone app
+            apps.append(d)
+        else:
+            # Possible pack — scan one level deep
+            for sub in os.listdir(full):
+                sub_full = os.path.join(full, sub)
+                if os.path.isdir(sub_full) and os.path.isfile(
+                    os.path.join(sub_full, "CMakeLists.txt")
+                ):
+                    apps.append(f"{d}/{sub}")
+    return sorted(apps)
 
 
 def get_app_required_modules() -> tuple[list[str], dict[str, list[str]]]:
-    """Scan app/*/west-requires.yml for additional west module dependencies.
+    """Scan west-requires.yml files for additional west module dependencies.
 
-    Returns (sorted_modules, {module_name: [app_names_that_need_it]}).
+    Checks both standalone apps (``app/<name>/west-requires.yml``) and
+    pack roots (``app/<pack>/west-requires.yml``).
+
+    Returns (sorted_modules, {module_name: [source_names_that_need_it]}).
     """
+    if not os.path.isdir(APP_DIR):
+        return [], {}
     module_to_apps: dict[str, list[str]] = {}
-    for app in get_apps():
-        req_file = os.path.join(APP_DIR, app, "west-requires.yml")
-        if not os.path.isfile(req_file):
+    seen: set[str] = set()
+    for d in os.listdir(APP_DIR):
+        full = os.path.join(APP_DIR, d)
+        if not os.path.isdir(full) or d.startswith("."):
             continue
+        req_file = os.path.join(full, "west-requires.yml")
+        if req_file in seen or not os.path.isfile(req_file):
+            continue
+        seen.add(req_file)
         try:
             with open(req_file) as f:
                 data = yaml.safe_load(f)
@@ -215,7 +242,7 @@ def get_app_required_modules() -> tuple[list[str], dict[str, list[str]]]:
             continue
         for mod in data.get("modules", []):
             if isinstance(mod, str) and mod.strip():
-                module_to_apps.setdefault(mod.strip(), []).append(app)
+                module_to_apps.setdefault(mod.strip(), []).append(d)
     return sorted(module_to_apps), module_to_apps
 
 def zephyr_env() -> dict:

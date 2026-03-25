@@ -65,7 +65,7 @@ Launch the REPL for autocomplete and command history:
 | `/create-app <name>` | Scaffold a new app under `app/` |
 | `/status` | Comprehensive workspace summary |
 | `/boards` | List supported boards |
-| `/apps` | List available applications |
+| `/apps` | List apps; `/apps --add` to manage packs |
 | `/sdk --status` | Show installed SDK and toolchains |
 | `/sdk --riscv` | Add RISC-V toolchain |
 | `/update` | Update Zephyr and modules |
@@ -99,12 +99,33 @@ Board targets use Zephyr v4.x qualified format: `board/soc[/variant]`. Run `/boa
 
 Families: Atmel SAM, Atmel SAM0, Microchip MEC, Microchip PIC32C, Microchip SAM, Microchip Other (RISC-V).
 
+## App Packs
+
+Pre-built Microchip app packs can be installed from the community registry. During `/install`, the CLI fetches the registry and presents an interactive selector:
+
+```
+  Available app packs:
+
+  [x] mgs_zephyr_lvgl    MGS LVGL graphics demos (XLCDC, maXTouch)    +lvgl
+
+  Space: toggle  |  Enter: confirm  |  Ctrl+C: skip
+```
+
+Selected packs are cloned into `app/` and their module dependencies are merged into the manifest automatically. Use `/apps --add` to add or remove packs at any time. `/update` pulls the latest for all installed packs.
+
+Pack apps are referenced with their pack prefix:
+```
+/build mgs_zephyr_lvgl/mgsz_lvgl_sama7d65_cu_ac69t88a_test -b sama7d65_curiosity
+```
+
+Local standalone apps (`/create-app myapp`) continue to work as before.
+
 ## App Module Dependencies
 
-The workspace ships with a base set of west modules (cmsis, hal_atmel, hal_microchip, etc.). If your app needs additional modules (e.g., LVGL), add a `west-requires.yml` to the app directory:
+Apps and packs can declare additional west modules via `west-requires.yml`:
 
 ```yaml
-# app/<app-dir>/west-requires.yml
+# app/<app-or-pack>/west-requires.yml
 modules:
   - lvgl
 ```
@@ -115,7 +136,7 @@ modules:
 
 ```
 manifest/west.yml       West manifest (Zephyr version + module allowlist, auto-generated)
-app/                    Zephyr applications (each with CMakeLists.txt, prj.conf, src/)
+app/                    Zephyr applications (standalone apps + cloned app packs)
 tools/zephyr_cli/       Python CLI source
 scripts/setup.ps1       PowerShell bootstrap (alternative to /install)
 zephyr.bat / zephyr.ps1 Windows entry points
