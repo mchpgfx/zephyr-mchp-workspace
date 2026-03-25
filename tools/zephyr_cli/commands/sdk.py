@@ -587,4 +587,4 @@ def run(args: list[str], console: Console) -> None:
             "(for mpfs_icicle, m2gl025_miv)[/]"
         )
     console.print()
-    console.print("  Now try: [bold]/build blinky -b sam_e70_xplained[/]")
+    console.print("  Now try: [bold]/build blinky -b sam_e70_xplained/same70q21[/]")

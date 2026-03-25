@@ -346,7 +346,7 @@ def run(args: list[str], console: Console) -> None:
             "(for mpfs_icicle, m2gl025_miv)[/]"
         )
     console.print()
-    console.print("  Now try: [bold]/build blinky -b sam_e70_xplained[/]")
+    console.print("  Now try: [bold]/build blinky -b sam_e70_xplained/same70q21[/]")
 
 
 def _run_west_update(west: str, console: Console) -> None:
@@ -366,6 +366,7 @@ def _run_west_update(west: str, console: Console) -> None:
     finished = [0]          # number of fully completed modules
     mod_pct = [0]           # 0-99 progress within current module
     mod_name = [""]         # current module name
+    mod_counted = [False]   # whether current module was counted in finished
     modules_seen = []       # ordered list of module names
     git_phase = [""]        # e.g. "Receiving objects"
 
@@ -393,8 +394,9 @@ def _run_west_update(west: str, console: Console) -> None:
         def _finish_module():
             """Mark the current module as complete."""
             with lock:
-                if mod_name[0] and mod_pct[0] < 100:
+                if mod_name[0] and not mod_counted[0]:
                     finished[0] += 1
+                    mod_counted[0] = True
                 mod_pct[0] = 0
                 git_phase[0] = ""
 
@@ -409,6 +411,7 @@ def _run_west_update(west: str, console: Console) -> None:
                     with lock:
                         mod_name[0] = name
                         mod_pct[0] = 0
+                        mod_counted[0] = False
                         if name not in modules_seen:
                             modules_seen.append(name)
                             if name not in WEST_MODULES:
