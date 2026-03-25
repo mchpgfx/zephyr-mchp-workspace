@@ -4,7 +4,7 @@ Zephyr RTOS workspace targeting Microchip and Atmel boards (ARM Cortex-M/R/A, RI
 
 ## Requirements
 
-- **Python 3.10+**
+- **Python 3.12+**
 - **Git 2.x+**
 - **Windows 10/11**, **Linux**, or **macOS**
 
