@@ -43,7 +43,7 @@ def run(args: list[str], console: Console) -> None:
     except (ValueError, IndexError):
         board = "?"
 
-    build_out = os.path.join(BUILD_DIR, app_name)
+    build_out = os.path.join(BUILD_DIR, *app_name.split("/"))
 
     src_rel = os.path.relpath(app_src, WORKSPACE_ROOT).replace("\\", "/")
     console.print(f"  [cyan]*[/] Building [bold]{app_name}[/] for [bold]{board}[/]")
