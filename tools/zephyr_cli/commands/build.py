@@ -4,7 +4,7 @@ import os
 
 from rich.console import Console
 
-from ..config import WORKSPACE_ROOT, APP_DIR, BUILD_DIR, WEST_EXE, get_apps, zephyr_env
+from ..config import WORKSPACE_ROOT, BUILD_DIR, WEST_EXE, get_apps, resolve_app, zephyr_env
 from ..live_output import run_live, print_error_context
 
 
@@ -25,9 +25,9 @@ def run(args: list[str], console: Console) -> None:
     extra = args[1:]
 
     # Validate app
-    app_src = os.path.join(APP_DIR, app_name)
-    if not os.path.isdir(app_src):
-        console.print(f"  [red]X App not found:[/] app/{app_name}")
+    app_src = resolve_app(app_name)
+    if app_src is None:
+        console.print(f"  [red]X App not found:[/] {app_name}")
         console.print(f"  Available: {', '.join(get_apps()) or '(none)'}")
         return
 
@@ -45,8 +45,9 @@ def run(args: list[str], console: Console) -> None:
 
     build_out = os.path.join(BUILD_DIR, app_name)
 
+    src_rel = os.path.relpath(app_src, WORKSPACE_ROOT).replace("\\", "/")
     console.print(f"  [cyan]*[/] Building [bold]{app_name}[/] for [bold]{board}[/]")
-    console.print(f"    source: app/{app_name}")
+    console.print(f"    source: {src_rel}")
     console.print(f"    output: build/{app_name}")
     console.print()
 
