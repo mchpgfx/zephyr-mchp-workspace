@@ -198,7 +198,7 @@ def cmd_apps(args, console):
 
 def cmd_clean(args, console):
     if args:
-        target = os.path.realpath(os.path.join(BUILD_DIR, args[0]))
+        target = os.path.realpath(os.path.join(BUILD_DIR, *args[0].split("/")))
         if not target.startswith(os.path.realpath(BUILD_DIR) + os.sep):
             console.print(f"  [red]X Invalid path:[/] {args[0]}")
             return
@@ -338,7 +338,7 @@ def cmd_status(args, console):
     apps = get_apps()
     if apps:
         for a in apps:
-            has_build = os.path.isdir(os.path.join(BUILD_DIR, a))
+            has_build = os.path.isdir(os.path.join(BUILD_DIR, *a.split("/")))
             mark = "[green]OK[/]" if has_build else "[dim]  [/]"
             console.print(f"    {mark} {a}")
     else:

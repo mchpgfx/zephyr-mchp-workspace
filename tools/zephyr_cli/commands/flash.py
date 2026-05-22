@@ -25,7 +25,7 @@ def run(args: list[str], console: Console) -> None:
     app_name = args[0]
     extra = args[1:]
 
-    build_out = os.path.join(BUILD_DIR, app_name)
+    build_out = os.path.join(BUILD_DIR, *app_name.split("/"))
     if not os.path.isdir(build_out):
         console.print(f"  [red]X No build found for[/] {app_name}")
         console.print(f"  Run [bold]/build {app_name} -b <board>[/] first.")
