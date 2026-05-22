@@ -59,7 +59,7 @@ def _exe(name: str) -> str:
 WORKSPACE_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-APP_DIR = os.path.join(WORKSPACE_ROOT, "app")
+APP_DIR = os.path.join(WORKSPACE_ROOT, "app")  # default app root
 BUILD_DIR = os.path.join(WORKSPACE_ROOT, "build")
 VENV_DIR = os.path.join(WORKSPACE_ROOT, ".venv")
 REQUIREMENTS = os.path.join(WORKSPACE_ROOT, "requirements.txt")
@@ -186,11 +186,31 @@ def invalidate_board_cache() -> None:
     _board_cache = None
 
 # ── Helpers ───────────────────────────────────────────────────────
-def get_apps():
-    """Return sorted list of buildable app paths relative to app/.
 
-    Standalone apps (have CMakeLists.txt):  ``'blinky'``
-    Pack apps (subdirs with CMakeLists.txt): ``'mgs_zephyr_lvgl/demo_app'``
+def resolve_app(name: str) -> str | None:
+    """Resolve an app name (e.g. ``blinky`` or ``lcdc_poc/app_gpu``) to its
+    absolute source directory, or None if not found.
+    """
+    full = os.path.join(APP_DIR, *name.split("/"))
+    return full if os.path.isdir(full) else None
+
+
+def get_apps() -> list[str]:
+    """Return sorted list of buildable app paths relative to ``app/``.
+
+    Three discovery rules applied in order for each directory under ``app/``:
+
+    1. **app\\*-prefixed sub-apps** — if the directory contains sub-dirs whose
+       names start with ``app`` and each has a ``CMakeLists.txt``, those are
+       the apps (e.g. ``lcdc_poc/app``, ``lcdc_poc/app_gpu``).  The root
+       ``CMakeLists.txt`` (if present) is ignored as a build target.
+
+    2. **Standalone app** — no ``app*`` sub-apps found, but the directory
+       itself has a ``CMakeLists.txt`` (e.g. ``blinky``).
+
+    3. **Generic pack** — no ``CMakeLists.txt`` at the root; scan one level
+       deep for any sub-dir that has one (e.g. cloned packs like
+       ``mgs_zephyr_lvgl/mgsz_lvgl_sama7d65_cu_ac69t88a_test``).
     """
     if not os.path.isdir(APP_DIR):
         return []
@@ -199,17 +219,34 @@ def get_apps():
         full = os.path.join(APP_DIR, d)
         if not os.path.isdir(full) or d.startswith("."):
             continue
+
+        # Rule 1: app*-prefixed sub-apps
+        app_subs = [
+            sub for sub in os.listdir(full)
+            if sub.startswith("app")
+            and os.path.isdir(os.path.join(full, sub))
+            and os.path.isfile(os.path.join(full, sub, "CMakeLists.txt"))
+        ]
+        if app_subs:
+            for sub in sorted(app_subs):
+                apps.append(f"{d}/{sub}")
+            continue
+
+        # Rule 2: standalone app
         if os.path.isfile(os.path.join(full, "CMakeLists.txt")):
-            # Standalone app
             apps.append(d)
-        else:
-            # Possible pack — scan one level deep
-            for sub in os.listdir(full):
-                sub_full = os.path.join(full, sub)
-                if os.path.isdir(sub_full) and os.path.isfile(
-                    os.path.join(sub_full, "CMakeLists.txt")
-                ):
-                    apps.append(f"{d}/{sub}")
+            continue
+
+        # Rule 3: generic pack — scan one level deep
+        for sub in os.listdir(full):
+            sub_full = os.path.join(full, sub)
+            if (
+                not sub.startswith(".")
+                and os.path.isdir(sub_full)
+                and os.path.isfile(os.path.join(sub_full, "CMakeLists.txt"))
+            ):
+                apps.append(f"{d}/{sub}")
+
     return sorted(apps)
 
 
@@ -219,7 +256,10 @@ def get_app_board_hint(app: str) -> str | None:
     Looks for ``# board: <board_target>`` on line 1.
     Returns the board string or None.
     """
-    cmake = os.path.join(APP_DIR, app, "CMakeLists.txt")
+    src = resolve_app(app)
+    if not src:
+        return None
+    cmake = os.path.join(src, "CMakeLists.txt")
     try:
         with open(cmake) as f:
             first = f.readline().strip()

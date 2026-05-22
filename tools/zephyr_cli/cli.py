@@ -112,8 +112,9 @@ class ZephyrCompleter(Completer):
                 for b in get_all_boards():
                     yield Completion(b)
             elif n == 4 and words[2] == "-b" and not text.endswith(" "):
+                needle = words[3].lower()
                 for b in get_all_boards():
-                    if b.startswith(words[3]):
+                    if needle in b.lower():
                         yield Completion(b, start_position=-len(words[3]))
 
         # /install completions
