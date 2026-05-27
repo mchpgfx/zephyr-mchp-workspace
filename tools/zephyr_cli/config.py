@@ -266,14 +266,25 @@ def get_app_board_hint(app: str) -> str | None:
     src = resolve_app(app)
     if not src:
         return None
-    cmake = os.path.join(src, "CMakeLists.txt")
-    try:
-        with open(cmake) as f:
-            first = f.readline().strip()
-    except OSError:
-        return None
-    if first.startswith("# board:"):
-        return first.split(":", 1)[1].strip() or None
+    # Walk from the app dir up to (but not including) APP_DIR so a board hint
+    # in a parent CMakeLists.txt serves as a default for all sub-apps within it.
+    check = src
+    app_dir_norm = os.path.normpath(APP_DIR)
+    while os.path.normpath(check) != app_dir_norm:
+        cmake = os.path.join(check, "CMakeLists.txt")
+        try:
+            with open(cmake) as f:
+                first = f.readline().strip()
+            if first.startswith("# board:"):
+                hint = first.split(":", 1)[1].strip()
+                if hint:
+                    return hint
+        except OSError:
+            pass
+        parent = os.path.dirname(check)
+        if parent == check:
+            break
+        check = parent
     return None
 
 
