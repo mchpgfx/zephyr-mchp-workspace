@@ -237,14 +237,21 @@ def get_apps() -> list[str]:
             apps.append(d)
             continue
 
-        # Rule 3: generic pack — scan one level deep
+        # Rule 3: generic pack — scan one level deep, applying app* rule at each subdir
         for sub in os.listdir(full):
             sub_full = os.path.join(full, sub)
-            if (
-                not sub.startswith(".")
-                and os.path.isdir(sub_full)
-                and os.path.isfile(os.path.join(sub_full, "CMakeLists.txt"))
-            ):
+            if sub.startswith(".") or not os.path.isdir(sub_full):
+                continue
+            app_subsubs = [
+                ss for ss in os.listdir(sub_full)
+                if ss.startswith("app")
+                and os.path.isdir(os.path.join(sub_full, ss))
+                and os.path.isfile(os.path.join(sub_full, ss, "CMakeLists.txt"))
+            ]
+            if app_subsubs:
+                for ss in sorted(app_subsubs):
+                    apps.append(f"{d}/{sub}/{ss}")
+            elif os.path.isfile(os.path.join(sub_full, "CMakeLists.txt")):
                 apps.append(f"{d}/{sub}")
 
     return sorted(apps)
