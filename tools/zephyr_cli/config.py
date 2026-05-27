@@ -187,6 +187,20 @@ def invalidate_board_cache() -> None:
 
 # ── Helpers ───────────────────────────────────────────────────────
 
+def _is_zephyr_app(cmake_path: str) -> bool:
+    """Return True only if cmake_path is a Zephyr build-root CMakeLists.txt.
+
+    Sub-CMakeLists files (e.g. ``target_sources(app ...)``) lack
+    ``cmake_minimum_required`` and must not be treated as standalone apps.
+    """
+    try:
+        with open(cmake_path) as f:
+            content = f.read(2048)
+        return "cmake_minimum_required" in content
+    except OSError:
+        return False
+
+
 def resolve_app(name: str) -> str | None:
     """Resolve an app name (e.g. ``blinky`` or ``lcdc_poc/app_gpu``) to its
     absolute source directory, or None if not found.
@@ -225,15 +239,18 @@ def get_apps() -> list[str]:
             sub for sub in os.listdir(full)
             if sub.startswith("app")
             and os.path.isdir(os.path.join(full, sub))
-            and os.path.isfile(os.path.join(full, sub, "CMakeLists.txt"))
+            and _is_zephyr_app(os.path.join(full, sub, "CMakeLists.txt"))
         ]
         if app_subs:
+            # Also keep the directory itself if it's a valid build root
+            if _is_zephyr_app(os.path.join(full, "CMakeLists.txt")):
+                apps.append(d)
             for sub in sorted(app_subs):
                 apps.append(f"{d}/{sub}")
             continue
 
         # Rule 2: standalone app
-        if os.path.isfile(os.path.join(full, "CMakeLists.txt")):
+        if _is_zephyr_app(os.path.join(full, "CMakeLists.txt")):
             apps.append(d)
             continue
 
@@ -246,12 +263,15 @@ def get_apps() -> list[str]:
                 ss for ss in os.listdir(sub_full)
                 if ss.startswith("app")
                 and os.path.isdir(os.path.join(sub_full, ss))
-                and os.path.isfile(os.path.join(sub_full, ss, "CMakeLists.txt"))
+                and _is_zephyr_app(os.path.join(sub_full, ss, "CMakeLists.txt"))
             ]
             if app_subsubs:
+                # Also keep the sub itself if it's a valid build root
+                if _is_zephyr_app(os.path.join(sub_full, "CMakeLists.txt")):
+                    apps.append(f"{d}/{sub}")
                 for ss in sorted(app_subsubs):
                     apps.append(f"{d}/{sub}/{ss}")
-            elif os.path.isfile(os.path.join(sub_full, "CMakeLists.txt")):
+            elif _is_zephyr_app(os.path.join(sub_full, "CMakeLists.txt")):
                 apps.append(f"{d}/{sub}")
 
     return sorted(apps)
