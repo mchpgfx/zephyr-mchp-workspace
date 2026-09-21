@@ -61,6 +61,9 @@ echo [*] Installing dependencies...
 
 :run
 .venv\Scripts\python -m tools.zephyr_cli %*
+REM Propagate the CLI's exit status so scripts/CI can detect a failed build.
+set "RC=%ERRORLEVEL%"
 
 popd
-endlocal
+REM %RC% is expanded before endlocal runs, so the value survives.
+endlocal & exit /b %RC%

@@ -21,6 +21,7 @@ from .config import (
     _venv_bin, _exe,
 )
 from .commands import install, update, build, flash, create_app, sdk, apps
+from .console_compat import panel_box
 from .live_output import run_live
 
 
@@ -401,22 +402,31 @@ def _run_shell(text: str, console: Console) -> None:
 
 # ── Main REPL ─────────────────────────────────────────────────────
 
-def _dispatch(cmd: str, args: list[str], console: Console) -> bool:
-    """Run a single command. Returns True if handled."""
+def _dispatch(cmd: str, args: list[str], console: Console) -> int | None:
+    """Run a single command.
+
+    Returns the command's exit status (0 = success), or None when *cmd* is
+    not a known command.  Handlers that return nothing are treated as
+    success; a raised exception is a failure, so one-shot mode can report a
+    non-zero status to the shell instead of always exiting 0.
+    """
     if cmd in ("/quit", "/exit"):
         console.print("[dim]Goodbye![/]")
-        return True
+        return 0
 
     handler = HANDLERS.get(cmd)
-    if handler:
-        try:
-            handler(args, console)
-        except KeyboardInterrupt:
-            console.print("\n  [yellow]Interrupted[/]")
-        except Exception as exc:
-            console.print(f"  [red]Error: {exc}[/]")
-        return True
-    return False
+    if handler is None:
+        return None
+
+    try:
+        rc = handler(args, console)
+    except KeyboardInterrupt:
+        console.print("\n  [yellow]Interrupted[/]")
+        return 130  # 128 + SIGINT
+    except Exception as exc:
+        console.print(f"  [red]Error: {exc}[/]")
+        return 1
+    return rc if isinstance(rc, int) else 0
 
 
 def _normalize_cmd(arg: str) -> str | None:
@@ -447,12 +457,13 @@ def main() -> int:
         cmd = _normalize_cmd(cli_args[0])
         if cmd:
             args = cli_args[1:]
-            if not _dispatch(cmd, args, console):
+            rc = _dispatch(cmd, args, console)
+            if rc is None:
                 console.print(
                     f"  [red]Unknown command:[/] {cmd}  — type [bold]/help[/] for commands"
                 )
                 return 1
-            return 0
+            return rc
 
     # Interactive REPL mode
     if not sys.stdout.isatty():
@@ -468,6 +479,7 @@ def main() -> int:
             "Type [bold cyan]/help[/] for commands, [bold cyan]Tab[/] to autocomplete\n"
             "[dim]Commands without / are passed to the shell (e.g. west flash)[/]",
             border_style="cyan",
+            box=panel_box(console.file),
             padding=(1, 3),
         )
     )
@@ -511,7 +523,7 @@ def main() -> int:
             break
 
         if cmd.startswith("/"):
-            if not _dispatch(cmd, args, console):
+            if _dispatch(cmd, args, console) is None:
                 console.print(
                     f"  [red]Unknown command:[/] {cmd}  — type [bold]/help[/] for commands"
                 )

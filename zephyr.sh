@@ -45,4 +45,5 @@ if [ ! -f .venv/bin/python ]; then
     .venv/bin/pip install -q -r requirements.txt
 fi
 
-.venv/bin/python -m tools.zephyr_cli "$@"
+# exec: replace the shell so the CLI's exit status is propagated verbatim.
+exec .venv/bin/python -m tools.zephyr_cli "$@"

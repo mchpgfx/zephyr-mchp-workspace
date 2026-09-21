@@ -15,6 +15,8 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
+from .console_compat import glyphs, panel_box
+
 TAIL_LINES = 5
 ERROR_CONTEXT = 4  # lines above/below each error match
 ERROR_FALLBACK_TAIL = 25  # fallback tail when no error pattern is found
@@ -71,13 +73,20 @@ def extract_error_context(
 
 
 def print_error_context(lines: list[str], console: Console) -> None:
-    """Print error-context lines."""
+    """Print error-context lines verbatim.
+
+    Compiler output is untrusted text: ``markup=False`` stops a diagnostic
+    containing ``[/]`` or ``[bold]`` from raising ``MarkupError`` (which
+    would swallow the very error being reported), and ``highlight=False``
+    keeps paths and numbers unrecoloured.  ``soft_wrap=True`` prevents Rich
+    from hard-wrapping long command lines into unreadable fragments.
+    """
     err = extract_error_context(lines)
     if not err:
         return
     console.print()
     for ln in err:
-        console.print(f"    {ln}")
+        console.print(f"    {ln}", markup=False, highlight=False, soft_wrap=True)
 
 
 class LiveOutput:
@@ -148,29 +157,31 @@ class LiveOutput:
                 if i < len(visible) - 1:
                     content.append("\n")
 
-        # Footer line
+        # Footer line — glyphs degrade to ASCII on a legacy codepage
+        g = glyphs(self.console.file)
+        sep = g["sep"]
         interrupted = not running and self._interrupted
         footer = Text("\n")
         if running:
-            footer.append("● ", style="bright_green bold")
+            footer.append(f"{g['running']} ", style="bright_green bold")
             footer.append("Running", style="cyan")
         elif interrupted:
-            footer.append("■ ", style="yellow bold")
+            footer.append(f"{g['stopped']} ", style="yellow bold")
             footer.append("Interrupted", style="yellow")
         elif rc == 0:
-            footer.append("✓ ", style="green bold")
+            footer.append(f"{g['ok']} ", style="green bold")
             footer.append("Done", style="green")
         else:
-            footer.append("✗ ", style="red bold")
+            footer.append(f"{g['fail']} ", style="red bold")
             footer.append(f"Failed (exit {rc})", style="red")
 
-        footer.append(f"  │  {total} lines", style="dim")
+        footer.append(f"  {sep}  {total} lines", style="dim")
 
         if hidden > 0:
             footer.append(f" ({hidden} hidden)", style="dim")
 
         toggle_label = "collapse" if expanded else "expand"
-        footer.append(f"  │  ctrl+o {toggle_label}", style="dim")
+        footer.append(f"  {sep}  ctrl+o {toggle_label}", style="dim")
 
         if running:
             border = "cyan"
@@ -183,9 +194,10 @@ class LiveOutput:
 
         return Panel(
             Group(content, footer),
-            title=f"[bold]{self.title}[/]",
+            title=Text(self.title, style="bold"),
             title_align="left",
             border_style=border,
+            box=panel_box(self.console.file),
             padding=(0, 1),
             expand=True,
         )
@@ -261,29 +273,55 @@ def run_live(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            # Compilers emit UTF-8 (e.g. GCC's curly quotes) regardless of
+            # the console codepage.  Decoding that as cp1252 raises
+            # UnicodeDecodeError part-way through and aborts the reader loop,
+            # losing the rest of the log and the child's real exit status.
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             cwd=cwd,
             env=env,
             shell=shell,
         )
 
-        with Live(
-            lo, console=console, refresh_per_second=4, transient=True
-        ) as live:
+        # A redirected stream can't host a live-updating panel: the panel is
+        # transient, so every line would be erased and the log would contain
+        # only the summary.  Stream plainly instead so `> log.txt` is complete.
+        if not console.is_terminal:
             try:
                 for line in proc.stdout:
-                    lo.add_line(line.rstrip())
+                    line = line.rstrip()
+                    lo.add_line(line)
+                    console.print(
+                        line, markup=False, highlight=False, soft_wrap=True
+                    )
             except KeyboardInterrupt:
                 proc.kill()
                 proc.wait()
                 lo.finish(proc.returncode or -1, interrupted=True)
-                live.refresh()
-                time.sleep(1)
                 return None, time.time() - t0, lo.get_lines()
 
             proc.wait()
             lo.finish(proc.returncode)
-            live.refresh()
+        else:
+            with Live(
+                lo, console=console, refresh_per_second=4, transient=True
+            ) as live:
+                try:
+                    for line in proc.stdout:
+                        lo.add_line(line.rstrip())
+                except KeyboardInterrupt:
+                    proc.kill()
+                    proc.wait()
+                    lo.finish(proc.returncode or -1, interrupted=True)
+                    live.refresh()
+                    time.sleep(1)
+                    return None, time.time() - t0, lo.get_lines()
+
+                proc.wait()
+                lo.finish(proc.returncode)
+                live.refresh()
     finally:
         stop.set()
         if key_thread:
