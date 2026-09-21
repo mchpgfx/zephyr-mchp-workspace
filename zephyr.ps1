@@ -49,5 +49,8 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 }
 
 & .venv\Scripts\python -m tools.zephyr_cli @args
+# Propagate the CLI's exit status so scripts/CI can detect a failed build.
+$rc = $LASTEXITCODE
 
 Pop-Location
+exit $rc
