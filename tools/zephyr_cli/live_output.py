@@ -28,7 +28,8 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _ERROR_RE = re.compile(
     r"error[:\[]|fatal error|FAILED|undefined reference|"
     r"cannot find|no such file|not found|CMake Error|"
-    r"multiple definition|ld returned|collect2:",
+    r"multiple definition|ld returned|collect2:|"
+    r"error occurred|could not connect|cannot connect",
     re.IGNORECASE,
 )
 
