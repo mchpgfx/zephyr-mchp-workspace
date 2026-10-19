@@ -201,10 +201,27 @@ def _is_zephyr_app(cmake_path: str) -> bool:
         return False
 
 
+def normalize_app_name(name: str) -> str:
+    """Normalize a user-typed app reference to its ``app/``-relative name.
+
+    Accepts pasted paths such as ``app/pack/demo/``, ``./app/blinky`` or
+    ``app\\blinky`` and returns ``pack/demo`` / ``blinky``.
+    """
+    name = name.replace("\\", "/").strip("/")
+    while name.startswith("./"):
+        name = name[2:]
+    if name == "app" or name.startswith("app/"):
+        name = name[3:]
+    return name.strip("/")
+
+
 def resolve_app(name: str) -> str | None:
     """Resolve an app name (e.g. ``blinky`` or ``lcdc_poc/app_gpu``) to its
     absolute source directory, or None if not found.
     """
+    name = normalize_app_name(name)
+    if not name:
+        return None
     full = os.path.join(APP_DIR, *name.split("/"))
     return full if os.path.isdir(full) else None
 

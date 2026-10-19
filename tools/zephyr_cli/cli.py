@@ -17,7 +17,7 @@ from rich.table import Table
 
 from .config import (
     WORKSPACE_ROOT, WEST_EXE, get_all_boards, get_boards,
-    get_apps, get_app_board_hint, BUILD_DIR, VENV_DIR, zephyr_env,
+    get_apps, get_app_board_hint, normalize_app_name, BUILD_DIR, VENV_DIR, zephyr_env,
     _venv_bin, _exe,
 )
 from .commands import install, update, build, flash, create_app, sdk, apps
@@ -46,35 +46,38 @@ COMMANDS = {
 def _app_completions(prefix: str, with_board: bool = False):
     """Yield app completions. Pack apps show app name with pack as meta.
 
+    *prefix* matches the full ``pack/app`` path or the bare app name, and a
+    pasted ``app/`` path prefix is ignored, so typing either the pack or the
+    displayed app name finds the app.
+
     When *with_board* is True, apps whose CMakeLists.txt has a
     ``# board: <target>`` first-line comment get `` -b <target>``
     appended to the inserted text automatically.
     """
+    needle = normalize_app_name(prefix) if prefix else ""
     for a in get_apps():
-        if not a.startswith(prefix):
+        app_name = a.rsplit("/", 1)[-1]
+        if not (a.startswith(needle) or app_name.startswith(needle)):
             continue
 
         text = a
-        meta = None
-        if with_board:
-            board = get_app_board_hint(a)
-            if board:
-                text = f"{a} -b {board}"
-                meta = board
+        board = get_app_board_hint(a) if with_board else None
+        if board:
+            text = f"{a} -b {board}"
 
         if "/" in a:
-            pack, app_name = a.split("/", 1)
+            pack = a.split("/", 1)[0]
             yield Completion(
                 text,
                 start_position=-len(prefix),
                 display=app_name,
-                display_meta=meta or pack,
+                display_meta=f"{pack} · {board}" if board else pack,
             )
         else:
             yield Completion(
                 text,
                 start_position=-len(prefix),
-                display_meta=meta,
+                display_meta=board,
             )
 
 
@@ -199,15 +202,16 @@ def cmd_apps(args, console):
 
 def cmd_clean(args, console):
     if args:
-        target = os.path.realpath(os.path.join(BUILD_DIR, *args[0].split("/")))
-        if not target.startswith(os.path.realpath(BUILD_DIR) + os.sep):
+        name = normalize_app_name(args[0])
+        target = os.path.realpath(os.path.join(BUILD_DIR, *name.split("/")))
+        if not name or not target.startswith(os.path.realpath(BUILD_DIR) + os.sep):
             console.print(f"  [red]X Invalid path:[/] {args[0]}")
             return
         if os.path.isdir(target):
             shutil.rmtree(target)
-            console.print(f"  [green]OK[/] Removed build/{args[0]}")
+            console.print(f"  [green]OK[/] Removed build/{name}")
         else:
-            console.print(f"  [yellow]Nothing to clean for {args[0]}[/]")
+            console.print(f"  [yellow]Nothing to clean for {name}[/]")
     else:
         if os.path.isdir(BUILD_DIR):
             shutil.rmtree(BUILD_DIR)

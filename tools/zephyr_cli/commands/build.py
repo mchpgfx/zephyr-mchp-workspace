@@ -5,7 +5,9 @@ import time
 
 from rich.console import Console
 
-from ..config import WORKSPACE_ROOT, BUILD_DIR, WEST_EXE, get_apps, resolve_app, zephyr_env
+from ..config import (
+    WORKSPACE_ROOT, BUILD_DIR, WEST_EXE, get_apps, normalize_app_name, resolve_app, zephyr_env,
+)
 from ..live_output import run_live, print_error_context
 
 
@@ -106,7 +108,7 @@ def run(args: list[str], console: Console) -> int:
         _usage(console)
         return 2
 
-    app_name = args[0]
+    app_name = normalize_app_name(args[0])
     extra = args[1:]
 
     # Validate app
