@@ -2,9 +2,10 @@
 
 import os
 
+import yaml
 from rich.console import Console
 
-from ..config import WORKSPACE_ROOT, BUILD_DIR, WEST_EXE, get_apps, zephyr_env
+from ..config import WORKSPACE_ROOT, BUILD_DIR, WEST_EXE, get_apps, normalize_app_name, zephyr_env
 from ..live_output import run_live, print_error_context
 
 
@@ -17,13 +18,29 @@ def _usage(console: Console) -> None:
     )
 
 
+def _flash_runner(build_out: str, extra: list[str]) -> str | None:
+    """Return the runner ``west flash`` will use: ``--runner``/``-r`` from
+    *extra*, else ``flash-runner`` from the build's ``runners.yaml``.
+    """
+    for i, arg in enumerate(extra):
+        if arg in ("--runner", "-r") and i + 1 < len(extra):
+            return extra[i + 1]
+        if arg.startswith("--runner="):
+            return arg.split("=", 1)[1]
+    try:
+        with open(os.path.join(build_out, "zephyr", "runners.yaml")) as f:
+            return (yaml.safe_load(f) or {}).get("flash-runner")
+    except (OSError, yaml.YAMLError):
+        return None
+
+
 def run(args: list[str], console: Console) -> int:
     """Flash an app.  Returns a process exit status (0 = success)."""
     if not args or args[0] in ("--help", "-h"):
         _usage(console)
         return 0 if args else 2
 
-    app_name = args[0]
+    app_name = normalize_app_name(args[0])
     extra = args[1:]
 
     build_out = os.path.join(BUILD_DIR, *app_name.split("/"))
@@ -56,6 +73,14 @@ def run(args: list[str], console: Console) -> int:
     console.print()
 
     cmd = [WEST_EXE, "flash", "-d", build_out] + extra
+    if _flash_runner(build_out, extra) == "jlink":
+        # Board-supplied J-Link scripts (e.g. at91bootstrap.jlink) lack
+        # ``ExitOnError 1``, so Commander exits 0 even when it cannot reach
+        # the target; force it.  The runner also discards Commander's output
+        # unless west is verbose, which would hide the reason for a failure.
+        cmd = [WEST_EXE, "-v", "flash", "-d", build_out] + extra + [
+            "--tool-opt=-ExitOnError 1",
+        ]
     env = zephyr_env()
 
     rc, elapsed, lines = run_live(
