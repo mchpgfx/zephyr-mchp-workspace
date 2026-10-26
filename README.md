@@ -60,7 +60,7 @@ Launch the REPL for autocomplete and command history:
 | Command | Description |
 |---------|-------------|
 | `/install [opts]` | Full workspace setup (venv, west, SDK, toolchain) |
-| `/build <app> -b <board>` | Build a Zephyr application |
+| `/build <app> [-b <board>]` | Build a Zephyr application (`-b` defaults to the app's `# board:` hint) |
 | `/flash <app> [--runner jlink]` | Flash firmware to a board |
 | `/create-app <name>` | Scaffold a new app under `app/` |
 | `/status` | Comprehensive workspace summary |

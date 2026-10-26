@@ -127,7 +127,7 @@ modules:
 
 ### Build Flow
 
-`/build <app> -b <board>` runs `west build -d build/<app> app/<app> -b <board>`. For pack apps the path includes the pack prefix (e.g., `app/mgs_zephyr_lvgl/demo_app`). All commands (build, shell pass-through, etc.) use `zephyr_env()` from `config.py` which sets `PATH`, `ZEPHYR_BASE`, and `ZEPHYR_SDK_INSTALL_DIR` automatically.
+`/build <app> -b <board>` runs `west build -d build/<app> app/<app> -b <board>`. If `-b`/`--board` is omitted, the board comes from `get_app_board_hint()` (the `# board: <target>` first-line comment in the app's or a parent dir's CMakeLists.txt); with no hint the build errors out. For pack apps the path includes the pack prefix (e.g., `app/mgs_zephyr_lvgl/demo_app`). All commands (build, shell pass-through, etc.) use `zephyr_env()` from `config.py` which sets `PATH`, `ZEPHYR_BASE`, and `ZEPHYR_SDK_INSTALL_DIR` automatically.
 
 ## Board Families
 

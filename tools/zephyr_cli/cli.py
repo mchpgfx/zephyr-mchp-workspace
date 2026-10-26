@@ -31,7 +31,7 @@ COMMANDS = {
     "/install":     "Full setup:  /install [--stable | --latest | --zephyr-ref REF] [--riscv]",
     "/sdk":         "Manage SDK toolchains:  /sdk [--status | --riscv | --all]",
     "/update":      "Update Zephyr and modules",
-    "/build":       "Build an application:  /build <app> -b <board>",
+    "/build":       "Build an application:  /build <app> [-b <board>]",
     "/flash":       "Flash firmware:  /flash <app> [--runner jlink]",
     "/create-app":  "Scaffold a new application",
     "/status":      "Show workspace status (Zephyr, SDK, toolchains, apps)",

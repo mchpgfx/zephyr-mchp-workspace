@@ -1,4 +1,7 @@
-"""  /build <app> -b <board> [extra west-build args]  — build firmware."""
+"""  /build <app> [-b <board>] [extra west-build args]  — build firmware.
+
+When ``-b`` is omitted, the board comes from the app's ``# board:`` hint.
+"""
 
 import os
 import time
@@ -6,7 +9,8 @@ import time
 from rich.console import Console
 
 from ..config import (
-    WORKSPACE_ROOT, BUILD_DIR, WEST_EXE, get_apps, normalize_app_name, resolve_app, zephyr_env,
+    WORKSPACE_ROOT, BUILD_DIR, WEST_EXE, get_apps, get_app_board_hint, normalize_app_name,
+    resolve_app, zephyr_env,
 )
 from ..live_output import run_live, print_error_context
 
@@ -118,14 +122,19 @@ def run(args: list[str], console: Console) -> int:
         console.print(f"  Available: {', '.join(get_apps()) or '(none)'}")
         return 2
 
-    # Validate -b is present
-    if "-b" not in extra:
-        console.print(f"  [red]X Missing board.[/]  Usage: /build {app_name} -b <board>")
-        return 2
+    # Fall back to the app's "# board:" hint when no board is given
+    if "-b" not in extra and "--board" not in extra:
+        hint = get_app_board_hint(app_name)
+        if not hint:
+            console.print(f"  [red]X Missing board.[/]  Usage: /build {app_name} -b <board>")
+            console.print("    (or start the app's CMakeLists.txt with [bold]# board: <target>[/])")
+            return 2
+        console.print(f"  [dim]Using board hint from CMakeLists.txt: {hint}[/]")
+        extra = ["-b", hint] + extra
 
     # Extract board name for display
     try:
-        board_idx = extra.index("-b")
+        board_idx = extra.index("-b" if "-b" in extra else "--board")
         board = extra[board_idx + 1]
     except (ValueError, IndexError):
         board = "?"
